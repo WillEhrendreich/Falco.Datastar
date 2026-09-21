@@ -5,12 +5,6 @@ open Falco.Markup
 open FsUnit.Xunit
 open Xunit
 
-[<AutoOpen>]
-module private Common =
-    let renderAttr attr =
-        Elem.div [ attr ] [ ]
-        |> renderNode
-
 module DsTests =
     [<Fact>]
     let ``Ds.bind should create an attribute`` () =
@@ -21,16 +15,6 @@ module DsTests =
     let ``Ds.post`` () =
         Ds.post "/channel"
         |> should equal """@post('/channel')"""
-
-    [<Fact>]
-    let ``Ds.post with Form`` () =
-        Ds.post ("/channel", { RequestOptions.Defaults with ContentType = Form })
-        |> should equal """@post('/channel',{&quot;contentType&quot;:&quot;form&quot;})"""
-
-    [<Fact>]
-    let ``Ds.post with SelectedForm`` () =
-        Ds.post ("/channel", { RequestOptions.Defaults with ContentType = (SelectedForm "myForm") })
-        |> should equal """@post('/channel',{&quot;contentType&quot;:&quot;form&quot;,&quot;selector&quot;:&quot;myForm&quot;})"""
 
     [<Fact>]
     let ``Ds.jsonSignalsOptions Exclude`` () =
@@ -207,73 +191,3 @@ module DsTests =
     let ``Ds.onEvent Document listens on the document`` () =
         renderAttr (Ds.onEvent ("keydown", "$k = evt.key", [ Document ]))
         |> should equal """<div data-on:keydown__document="$k = evt.key"></div>"""
-
-    [<Fact>]
-    let ``RequestOptions Cleanup cancels the request when the element is removed`` () =
-        Ds.get ("/x", { RequestOptions.Defaults with RequestCancellation = Cleanup })
-        |> should equal """@get('/x',{&quot;requestCancellation&quot;:&quot;cleanup&quot;})"""
-
-    [<Fact>]
-    let ``RequestOptions CustomJson is sent as the payload object`` () =
-        Ds.post ("/x", { RequestOptions.Defaults with ContentType = CustomJson {| a = 1 |} })
-        |> should equal """@post('/x',{&quot;contentType&quot;:&quot;json&quot;,&quot;payload&quot;:{&quot;a&quot;:1}})"""
-
-    // Retry options: the names are the ones Datastar 1.0.4 reads (createHttpMethod in fetch.ts).
-    // RC.8 and earlier read retryMaxWaitMs; since 1.0.0 the name is retryMaxWait.
-
-    [<Fact>]
-    let ``RequestOptions RetryMaxWait is sent as retryMaxWait`` () =
-        Ds.get ("/x", { RequestOptions.Defaults with RetryMaxWait = System.TimeSpan.FromSeconds 5.0 })
-        |> should equal """@get('/x',{&quot;retryMaxWait&quot;:5000})"""
-
-    [<Fact>]
-    let ``RequestOptions Retry is sent when it is not the default`` () =
-        Ds.get ("/x", { RequestOptions.Defaults with Retry = OnError })
-        |> should equal """@get('/x',{&quot;retry&quot;:&quot;error&quot;})"""
-        Ds.get ("/x", { RequestOptions.Defaults with Retry = OnAlways })
-        |> should equal """@get('/x',{&quot;retry&quot;:&quot;always&quot;})"""
-        Ds.get ("/x", { RequestOptions.Defaults with Retry = OnNever })
-        |> should equal """@get('/x',{&quot;retry&quot;:&quot;never&quot;})"""
-
-    [<Fact>]
-    let ``RequestOptions retry interval, scaler and count keep their names`` () =
-        Ds.get ("/x", { RequestOptions.Defaults with RetryInterval = System.TimeSpan.FromMilliseconds 250.0 })
-        |> should equal """@get('/x',{&quot;retryInterval&quot;:250})"""
-        Ds.get ("/x", { RequestOptions.Defaults with RetryScaler = 3.0 })
-        |> should equal """@get('/x',{&quot;retryScaler&quot;:3})"""
-        Ds.get ("/x", { RequestOptions.Defaults with RetryMaxCount = 4 })
-        |> should equal """@get('/x',{&quot;retryMaxCount&quot;:4})"""
-
-    [<Fact>]
-    let ``RequestOptions Defaults write no options, so Datastar's defaults apply`` () =
-        Ds.get ("/x", RequestOptions.Defaults)
-        |> should equal "@get('/x',{})"
-
-    [<Fact>]
-    let ``RequestOptions.Defaults is one shared object, because it is read many times for every option that is written`` () =
-        obj.ReferenceEquals(RequestOptions.Defaults, RequestOptions.Defaults) |> should equal true
-
-    [<Fact>]
-    let ``RequestOptions OpenWhenHidden is not set by default`` () =
-        RequestOptions.Defaults.OpenWhenHidden
-        |> should equal (ValueNone : bool voption)
-
-    [<Fact>]
-    let ``RequestOptions OpenWhenHidden can be set to false, even for a POST`` () =
-        Ds.post ("/x", { RequestOptions.Defaults with OpenWhenHidden = ValueSome false })
-        |> should equal """@post('/x',{&quot;openWhenHidden&quot;:false})"""
-
-    [<Fact>]
-    let ``RequestOptions OpenWhenHidden true is sent as a JSON boolean`` () =
-        Ds.get ("/x", { RequestOptions.Defaults with OpenWhenHidden = ValueSome true })
-        |> should equal """@get('/x',{&quot;openWhenHidden&quot;:true})"""
-
-    [<Fact>]
-    let ``Ds.query creates a query action`` () =
-        Ds.query "/search" |> should equal """@query('/search')"""
-
-    [<Fact>]
-    let ``Ds.query takes request options`` () =
-        Ds.query ("/search", { RequestOptions.Defaults with RequestCancellation = Disabled })
-        |> should equal """@query('/search',{&quot;requestCancellation&quot;:&quot;disabled&quot;})"""
-

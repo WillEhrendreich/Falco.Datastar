@@ -48,7 +48,9 @@ type Rocket =
         | NonValueAttr key -> NonValueAttr (key + "__root")
 
     static member private prop (name:string, encoded:string) =
-        Attr.create (String.datastarKebab name) (Js.attrEncode encoded)
+        let attributeName = String.datastarKebab name
+        Guard.attributeName "prop name" false attributeName
+        Attr.create attributeName (Js.attrEncode encoded)
 
     /// <summary>
     /// A string prop. The attribute name is the prop name converted the way Rocket converts it, e.g. <c>maxCount</c> becomes <c>max-count</c>.
@@ -118,13 +120,23 @@ type Rocket =
     /// <param name="index">The index's name</param>
     /// <returns>Element</returns>
     static member templateFor (source:string, children:XmlNode list, ?item:string, ?index:string) =
-        let expression =
-            match item, index with
-            | None, None -> source
-            | Some item', None -> $"{item'} in {source}"
-            | None, Some index' -> $"item, {index'} in {source}"
-            | Some item', Some index' -> $"{item'}, {index'} in {source}"
-        Elem.template [ Attr.create "data-for" (Js.attrEncode expression) ] children
+        Rocket.templateForEncoded (Js.attrEncode (Rocket.forExpression (source, item, index)), children)
+
+    /// The text of a data-for attribute: an optional item name and index name, and the source
+    /// A template element with a directive whose text is already safe for an attribute
+    static member private directive (name:string, safeExpression:string, children:XmlNode list) =
+        Elem.template [ Attr.create name safeExpression ] children
+
+    static member private forExpression (source:string, item:string option, index:string option) =
+        match item, index with
+        | None, None -> source
+        | Some item', None -> $"{item'} in {source}"
+        | None, Some index' -> $"item, {index'} in {source}"
+        | Some item', Some index' -> $"{item'}, {index'} in {source}"
+
+    /// The typed overloads build text that is already safe for an attribute, so it must not be encoded again
+    static member private templateForEncoded (safeExpression:string, children:XmlNode list) =
+        Elem.template [ Attr.create "data-for" safeExpression ] children
 
     /// <summary>
     /// Renders the children only while the condition is true. To make a chain, put <see cref="templateElseIf"/> and <see cref="templateElse"/> elements directly after it.
@@ -135,7 +147,7 @@ type Rocket =
     /// <param name="children">The content to render</param>
     /// <returns>Element</returns>
     static member templateIf (condition:string, children:XmlNode list) =
-        Elem.template [ Attr.create "data-if" (Js.attrEncode condition) ] children
+        Rocket.directive ("data-if", Js.attrEncode condition, children)
 
     /// <summary>
     /// The next branch of a chain that starts with <see cref="templateIf"/>. It must come directly after a templateIf or another templateElseIf.
@@ -144,7 +156,7 @@ type Rocket =
     /// <param name="children">The content to render</param>
     /// <returns>Element</returns>
     static member templateElseIf (condition:string, children:XmlNode list) =
-        Elem.template [ Attr.create "data-else-if" (Js.attrEncode condition) ] children
+        Rocket.directive ("data-else-if", Js.attrEncode condition, children)
 
     /// <summary>
     /// The last branch of a chain. It must come directly after a templateIf or a templateElseIf.
@@ -161,7 +173,7 @@ type Rocket =
     /// <param name="children">The content to render</param>
     /// <returns>Element</returns>
     static member templateIf (condition:Expr<bool>, children:XmlNode list) =
-        Rocket.templateIf (Expr.toString condition, children)
+        Rocket.directive ("data-if", Expr.toString condition, children)
 
     /// <summary>
     /// The next branch of a chain. This is <see cref="templateElseIf"/> with a boolean expression.
@@ -170,7 +182,7 @@ type Rocket =
     /// <param name="children">The content to render</param>
     /// <returns>Element</returns>
     static member templateElseIf (condition:Expr<bool>, children:XmlNode list) =
-        Rocket.templateElseIf (Expr.toString condition, children)
+        Rocket.directive ("data-else-if", Expr.toString condition, children)
 
     /// <summary>
     /// Repeats a row once for each item in a list. The function that builds the row receives the item and the index as typed expressions,
@@ -184,8 +196,8 @@ type Rocket =
     /// <param name="indexName">The name for the index; it must be a JavaScript identifier</param>
     /// <returns>Element</returns>
     static member forEach (source:Expr<'T list>, row:Expr<'T> -> Expr<int> -> XmlNode list, ?itemName:string, ?indexName:string) =
-        itemName |> Option.iter (Guard.notBlank "itemName" "Rocket.forEach needs an item name that is a JavaScript identifier, such as \"entry\".")
-        indexName |> Option.iter (Guard.notBlank "indexName" "Rocket.forEach needs an index name that is a JavaScript identifier, such as \"n\".")
+        itemName |> Option.iter (Guard.javaScriptIdentifier "itemName" "Rocket.forEach needs an item name that is a JavaScript identifier, such as \"entry\"")
+        indexName |> Option.iter (Guard.javaScriptIdentifier "indexName" "Rocket.forEach needs an index name that is a JavaScript identifier, such as \"n\"")
         let item = Expr.unsafeRaw<'T> (defaultArg itemName "item")
         let index = Expr.unsafeRaw<int> (defaultArg indexName "i")
-        Rocket.templateFor (Expr.toString source, row item index, ?item = itemName, ?index = indexName)
+        Rocket.templateForEncoded (Rocket.forExpression (Expr.toString source, itemName, indexName), row item index)

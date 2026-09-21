@@ -50,7 +50,7 @@ let getRocketManifests (ctx:HttpContext) =
             | count -> body.Write(chunk, 0, count)
         match body.Length > int64 maxManifestBytes with
         | true ->
-            return Error (TooLarge maxManifestBytes)
+            return Error (RocketManifestError.TooLarge maxManifestBytes)
         | false ->
             return RocketManifest.parse (System.Text.Encoding.UTF8.GetString(body.GetBuffer(), 0, int body.Length))
     }

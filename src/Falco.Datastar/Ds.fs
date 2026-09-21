@@ -102,7 +102,7 @@ type Ds =
     /// <returns>Attribute</returns>
     static member bindProp (signalPath:SignalPath, propName:string, ?events:string list) =
         propName |> Guard.notBlank "propName" "Ds.bindProp needs the name of an element property, such as \"checked\". An empty name makes Datastar throw BindPropNameMissing."
-        events |> Option.iter (List.iter (Guard.notBlank "events" "Ds.bindProp cannot list an empty event name."))
+        events |> Option.iter (List.iter (Guard.notBlank "events" "Ds.bindProp was given an empty event name. Datastar listens for each name that follows __event, so an empty one listens for nothing. Remove it, or pass names such as [ \"input\"; \"change\" ]."))
         DsAttr.start "bind"
         |> DsAttr.addTarget (signalPath |> SignalPath.kebabValue)
         |> DsAttr.addModifierOption (events |> Option.filter (List.isEmpty >> not) |> Option.map (fun names -> { Name = "event"; Tags = names }) |> Option.toValueOption)
@@ -184,7 +184,7 @@ type Ds =
         |> DsAttr.create
 
     /// <summary>
-    /// Show or hides an element based on an expressions "true-ness".
+    /// Shows or hides an element based on the truthiness of an expression.
     /// https://data-star.dev/reference/attributes#data-show
     /// </summary>
     /// <param name="boolExpression">The expression that will be evaluated; if true = the element is visible, https://data-star.dev/guide/datastar_expressions</param>
@@ -323,7 +323,7 @@ type Ds =
     /// Evaluates the expression on a steady interval
     /// </summary>
     /// <param name="expression">The expression to evaluate when the event is triggered; https://data-star.dev/guide/datastar_expressions</param>
-    /// <param name="intervalMs">The time between each evaluation; default = 1000</param>
+    /// <param name="intervalMs">The time between each evaluation, in milliseconds</param>
     /// <param name="leading">Execute the first interval immediately; default = false</param>
     /// <param name="viewTransition">Wrap expression in document.startViewTransition(); default = false</param>
     /// <returns>Attribute</returns>
@@ -335,7 +335,7 @@ type Ds =
         |> DsAttr.create
 
     /// <summary>
-    /// Fires the expression when a signal is changed. Filter using Ds.filterOnSignalPatch
+    /// Fires the expression when a signal is changed. Filter using Ds.onSignalPatchFilter
     /// https://data-star.dev/reference/attributes#data-on-signal-patch
     /// </summary>
     /// <param name="expression">The expression to evaluate when the event is triggered; https://data-star.dev/guide/datastar_expressions</param>
@@ -544,7 +544,7 @@ type Ds =
         DsAttr.create ("text", value = Expr.toString expression)
 
     /// <summary>
-    /// Show or hides an element based on a boolean expression.
+    /// Shows or hides an element based on a boolean expression.
     /// https://data-star.dev/reference/attributes#data-show
     /// </summary>
     /// <param name="condition">If it is true the element is visible</param>
@@ -719,4 +719,7 @@ type Ds =
     /// https://stackoverflow.com/questions/8788802/prevent-safari-loading-from-cache-when-back-button-is-clicked
     /// </summary>
     static member safariStreamingFix =
-        Attr.create "data-on:pageshow.window" "evt?.persisted && window.location.reload()"
+        DsAttr.startEvent "pageshow"
+        |> DsAttr.addModifier { Name = "window"; Tags = [] }
+        |> DsAttr.addValue "evt?.persisted && window.location.reload()"
+        |> DsAttr.create

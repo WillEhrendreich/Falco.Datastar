@@ -9,10 +9,6 @@ open Xunit
 // Typed signals, expressions and statements. They replace the JavaScript strings in Ds.text, Ds.show, Ds.onClick and the like.
 // The comments name the rule of the Tao of Datastar that a case protects.
 module ExprTests =
-    let private renderAttr attr =
-        Elem.div [ attr ] []
-        |> renderNode
-
     let private count = Signal.browser<int> "count"
     let private menuOpen = Signal.browser<bool> "menuOpen"
     let private firstName = Signal.server<string> "form.firstName"
@@ -44,37 +40,111 @@ module ExprTests =
         Signal.scope firstName |> should equal SignalScope.Server
         Signal.scope isOn |> should equal SignalScope.RocketComponent
 
+    let private problemOf scope name =
+        match Signal.tryCreate<int> scope name with
+        | Error error -> error
+        | Ok _ -> failwith $"expected an error for '{name}'"
+
     [<Fact>]
     let ``A server signal cannot start with an underscore, because Datastar would keep it in the browser`` () =
-        match Signal.tryCreate<string> SignalScope.Server "_secret" with
-        | Error message ->
-            message |> should haveSubstring "_secret"
-            message |> should haveSubstring "Signal.browser"
-        | Ok _ -> failwith "expected an error"
+        let error = problemOf SignalScope.Server "_secret"
+        error |> should equal (SignalNameError.StartsWithUnderscore (SignalScope.Server, "_secret"))
+        error.Message |> should equal "The signal name '_secret' starts with an underscore. Datastar keeps a signal like that in the browser and never sends it to the server. Use Signal.browser for a browser-only signal, and write the name without the underscore. Use a name without an underscore for a signal you want to send."
+
+    [<Fact>]
+    let ``A browser or Rocket signal is told to leave the underscore out`` () =
+        (problemOf SignalScope.Browser "_x").Message |> should equal "The signal name '_x' starts with an underscore. Signal.browser adds the underscore itself, so write the name without it."
+        (problemOf SignalScope.RocketComponent "_x").Message |> should equal "The signal name '_x' starts with an underscore. Write the name without it."
 
     [<Fact>]
     let ``A name with a hyphen is refused, because an expression reads it as minus`` () =
-        match Signal.tryCreate<int> SignalScope.Browser "my-count" with
-        | Error message -> message |> should haveSubstring "myCount"
-        | Ok _ -> failwith "expected an error"
+        let error = problemOf SignalScope.Browser "my-count"
+        error |> should equal (SignalNameError.HasHyphen "my-count")
+        error.Message |> should equal "The signal name 'my-count' has a hyphen. In an expression Datastar reads a hyphen as minus. Use camelCase instead, for example 'myCount'."
+
+    [<Fact>]
+    let ``A blank name is refused`` () =
+        problemOf SignalScope.Browser " " |> should equal SignalNameError.Blank
+        (problemOf SignalScope.Browser "").Message |> should equal "A signal needs a name. Give it a camelCase name such as 'menuOpen', or a dotted one such as 'form.firstName'."
+
+    // Datastar reads the name of a signal from an attribute name. HTML makes that lower case, and Datastar reads '__' as the start of a modifier.
+    // A name that would be read differently from the way an expression writes it is refused, so the two cannot disagree.
+
+    [<Fact>]
+    let ``A part that starts with a capital letter is refused, because the attribute name would make it lower case`` () =
+        let error = problemOf SignalScope.Server "form.First"
+        error |> should equal (SignalNameError.StartsWithCapital "form.First")
+        error.Message |> should equal "The signal name 'form.First' has a part that starts with a capital letter. Datastar reads the name from an attribute name, and HTML makes attribute names lower case, so the signal would be called 'form.first' there but 'form.First' in an expression. Start each part with a lower case letter, for example 'form.first'."
+
+    [<Fact>]
+    let ``A name with two underscores in a row is refused, because Datastar reads them as a modifier`` () =
+        let error = problemOf SignalScope.Server "a__b"
+        error |> should equal (SignalNameError.HasDoubleUnderscore "a__b")
+        error.Message |> should equal "The signal name 'a__b' has two underscores in a row. Datastar reads '__' in an attribute name as the start of a modifier, so it would read 'a__b' as 'a' with a modifier. Use a single underscore, or camelCase."
+
+    [<Fact>]
+    let ``A part that ends with an underscore is refused, because it would run into a modifier`` () =
+        let error = problemOf SignalScope.Server "a_"
+        error |> should equal (SignalNameError.EndsWithUnderscore "a_")
+        error.Message |> should equal "The signal name 'a_' has a part that ends with an underscore. Datastar would read that underscore together with the two that start a modifier, and lose part of the name. Remove the trailing underscore."
+
+    [<Fact>]
+    let ``A name that ends with a line break is refused, although a dollar sign in a pattern would let it through`` () =
+        problemOf SignalScope.Server "menu\n" |> should equal (SignalNameError.NotAPath "menu\n")
 
     [<Theory>]
-    [<InlineData("")>]
-    [<InlineData("  ")>]
     [<InlineData("1abc")>]
     [<InlineData("a b")>]
     [<InlineData("a..b")>]
     [<InlineData("a.")>]
     [<InlineData("$a")>]
+    [<InlineData("a$")>]
     let ``A name that Datastar cannot read as a signal path is refused`` (name: string) =
-        match Signal.tryCreate<int> SignalScope.Browser name with
-        | Error _ -> ()
-        | Ok _ -> failwith $"expected an error for '{name}'"
+        problemOf SignalScope.Browser name |> should equal (SignalNameError.NotAPath name)
+
+    [<Theory>]
+    [<InlineData("count")>]
+    [<InlineData("menuOpen")>]
+    [<InlineData("form.firstName")>]
+    [<InlineData("first_name")>]
+    [<InlineData("a1")>]
+    [<InlineData("a_1")>]
+    let ``A name that Datastar reads as written is accepted`` (name: string) =
+        match Signal.tryCreate<int> SignalScope.Server name with
+        | Ok signal -> Signal.path signal |> should equal name
+        | Error error -> failwith error.Message
 
     [<Fact>]
     let ``Signal.browser raises with the same message when the name is invalid`` () =
         let raised = Assert.Throws<ArgumentException>(fun () -> Signal.browser<int> "my-count" |> ignore)
-        raised.Message |> should haveSubstring "myCount"
+        raised.Message |> should haveSubstring "Use camelCase instead, for example 'myCount'."
+
+    /// What Datastar 1.0.4 does with the key of a data-signals attribute: it splits at '__' and applies its camel case to what is left (library/src/utils/text.ts).
+    let private datastarSignalName (attribute:string) =
+        let key = attribute.Substring("data-signals:".Length)
+        let name = key.Split("__").[0]
+        Text.RegularExpressions.Regex.Replace(name, "-[a-z]", fun found -> found.Value.Substring(1).ToUpperInvariant())
+
+    [<Fact>]
+    let ``Every name that is accepted is read by Datastar as the name that an expression uses`` () =
+        let random = Random 42
+        let alphabet = "abcXYZ019_.-$ "
+        let scopes = [ SignalScope.Browser; SignalScope.Server; SignalScope.RocketComponent ]
+        let mutable accepted = 0
+        for _ in 1 .. 30000 do
+            let name = String(Array.init (random.Next(1, 9)) (fun _ -> alphabet.[random.Next alphabet.Length]))
+            let scope = scopes.[random.Next scopes.Length]
+            match Signal.tryCreate<int> scope name with
+            | Error _ -> ()
+            | Ok signal ->
+                accepted <- accepted + 1
+                // A modifier that the library adds is still a modifier, and does not change the name
+                let rendered = renderAttr (Ds.signal (signal, 1, ifMissing = true))
+                let attribute = rendered.Substring("<div ".Length, rendered.IndexOf '=' - "<div ".Length)
+                datastarSignalName attribute |> should equal (Signal.path signal)
+                attribute |> should endWith "__ifmissing"
+        // The alphabet is mostly bad characters, so a run that accepted nothing would prove nothing
+        accepted |> should be (greaterThan 500)
 
     // Expressions
 
@@ -88,14 +158,7 @@ module ExprTests =
 
     [<Fact>]
     let ``A float is written with a dot whatever the current culture is`` () =
-        let commaDecimal = Globalization.CultureInfo.InvariantCulture.Clone() :?> Globalization.CultureInfo
-        commaDecimal.NumberFormat.NumberDecimalSeparator <- ","
-        let original = Globalization.CultureInfo.CurrentCulture
-        try
-            Globalization.CultureInfo.CurrentCulture <- commaDecimal
-            Expr.toString (Expr.float 1.5) |> should equal "1.5"
-        finally
-            Globalization.CultureInfo.CurrentCulture <- original
+        withCommaDecimalCulture (fun () -> Expr.toString (Expr.float 1.5) |> should equal "1.5")
 
     [<Fact>]
     let ``A float that is not a finite number is still a JavaScript literal`` () =
@@ -115,8 +178,18 @@ module ExprTests =
         Expr.toString (Expr.subtract (Expr.read count) (Expr.int 1)) |> should equal "($_count - 1)"
         Expr.toString (Expr.add (Expr.read count) (Expr.int 1)) |> should equal "($_count + 1)"
         Expr.toString (Expr.multiply (Expr.read count) (Expr.int 2)) |> should equal "($_count * 2)"
-        Expr.toString (Expr.divide (Expr.read count) (Expr.int 2)) |> should equal "($_count / 2)"
         Expr.toString (Expr.remainder (Expr.read count) (Expr.int 3)) |> should equal "($_count % 3)"
+
+    [<Fact>]
+    let ``Dividing whole numbers gives a whole number, because a JavaScript number has no integer type`` () =
+        // 7 / 2 is 3.5 in JavaScript, and an int signal must not hold that
+        Expr.toString (Expr.divide (Expr.read count) (Expr.int 2)) |> should equal "Math.trunc($_count / 2)"
+        Expr.toString (Expr.divide (Expr.read (Signal.browser<int64> "big")) (Expr.unsafeRaw<int64> "2")) |> should equal "Math.trunc($_big / 2)"
+
+    [<Fact>]
+    let ``Dividing other numbers keeps the fraction`` () =
+        Expr.toString (Expr.divide (Expr.read (Signal.browser<float> "ratio")) (Expr.float 2.0)) |> should equal "($_ratio / 2)"
+        Expr.toString (Expr.divide (Expr.read (Signal.browser<decimal> "price")) (Expr.unsafeRaw<decimal> "4")) |> should equal "($_price / 4)"
 
     [<Fact>]
     let ``Comparisons use the strict JavaScript operators`` () =
@@ -152,6 +225,25 @@ module ExprTests =
     [<Fact>]
     let ``unsafeRaw passes JavaScript through, for what the typed functions do not cover`` () =
         Expr.toString (Expr.unsafeRaw<string> "evt.key") |> should equal "evt.key"
+        Expr.toString (Expr.unsafeRaw<int> "$count") |> should equal "$count"
+
+    [<Fact>]
+    let ``unsafeRaw puts JavaScript that is more than a name in parentheses, so an operator applies to all of it`` () =
+        let either = Expr.unsafeRaw<bool> "$a || $b"
+        Expr.toString either |> should equal "($a || $b)"
+        Expr.toString (Expr.negate either) |> should equal "(!($a || $b))"
+        Expr.toString (Expr.andAlso either (Expr.bool true)) |> should equal "(($a || $b) && true)"
+
+    [<Fact>]
+    let ``unsafeRaw escapes the JavaScript for the attribute, like every other expression`` () =
+        Expr.toString (Expr.unsafeRaw<bool> "$a && \"x\" < 1") |> should equal "($a &amp;&amp; &quot;x&quot; &lt; 1)"
+        Stmt.toString (Stmt.unsafeRaw "$a = \"x\"") |> should equal "$a = &quot;x&quot;"
+        renderAttr (Ds.onClick (Stmt.unsafeRaw "$a = \"x\"")) |> should equal """<div data-on:click="$a = &quot;x&quot;"></div>"""
+
+    [<Fact>]
+    let ``Stmt.all needs a statement, because an empty expression makes Datastar throw`` () =
+        let error = Assert.Throws<ArgumentException>(fun () -> Stmt.all [] |> ignore)
+        error.Message |> should haveSubstring "Stmt.all needs at least one statement."
 
     // Statements
 

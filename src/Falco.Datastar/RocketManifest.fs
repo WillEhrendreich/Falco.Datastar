@@ -43,7 +43,7 @@ type RocketManifestProp =
       /// The attribute the prop is read from, e.g. max-count for maxCount
       Attribute: string
       Type: RocketPropType
-      /// The value the prop has when the attribute is missing, as JSON
+      /// The value the prop has when the attribute is missing, as JSON. It is null when the component's codec has no default
       Default: JsonElement
       Required: bool
       /// The values a oneOf prop allows
@@ -78,6 +78,7 @@ type RocketManifestDocument =
 
 /// Why a manifest could not be read. The first problem found is the one reported.
 /// A case with a place says where in the manifest the problem is, for example: the prop "count" of my-card.
+[<RequireQualifiedAccess>]
 type RocketManifestError =
     /// The text is not JSON
     | NotJson of reason:string
@@ -89,16 +90,19 @@ type RocketManifestError =
     | WrongKind of property:string * expected:string * place:string
     /// The manifest has a version that this library does not read
     | UnsupportedVersion of found:int * supported:int
+    /// The body is JSON, but it is not an object
+    | NotAnObject
     with
-    /// A message for a person, that says what is wrong and what to do about it
+    /// A message for a person, that says what is wrong. When the fix is not obvious, it says what to do
     member error.Message =
         match error with
-        | NotJson reason -> $"The manifest is not valid JSON: {reason}"
-        | TooLarge limitBytes ->
+        | NotAnObject -> "The manifest must be a JSON object with a version, a generatedAt and a list of components, but the body is something else. Check that the request comes from publishRocketManifests."
+        | RocketManifestError.NotJson reason -> $"The manifest is not valid JSON: {reason}"
+        | RocketManifestError.TooLarge limitBytes ->
             $"The manifest is larger than {limitBytes / 1024 / 1024} MiB, so it was not read. The manifest of a page is far smaller than that. Check what is posting to this endpoint."
-        | Missing (property, place) -> $"The manifest has no \"{property}\" in {place}"
-        | WrongKind (property, expected, place) -> $"The \"{property}\" in {place} is not {expected}"
-        | UnsupportedVersion (found, supported) ->
+        | RocketManifestError.Missing (property, place) -> $"The manifest has no \"{property}\" in {place}"
+        | RocketManifestError.WrongKind (property, expected, place) -> $"The \"{property}\" in {place} is not {expected}"
+        | RocketManifestError.UnsupportedVersion (found, supported) ->
             $"This library reads Rocket manifest version {supported}, but the document is version {found}. Update Falco.Datastar to a version that reads it, or check that the page and this server use compatible versions of Datastar."
 
 /// <summary>
@@ -119,14 +123,16 @@ module RocketManifest =
     let private required (name:string) (place:string) (element:JsonElement) =
         match property name element with
         | ValueSome value -> Ok value
-        | ValueNone -> Error (Missing (name, place))
+        | ValueNone -> Error (RocketManifestError.Missing (name, place))
 
     let private text (name:string) (place:string) (element:JsonElement) =
         required name place element
         |> Result.bind (fun value ->
             match value.ValueKind with
             | JsonValueKind.String -> Ok (value.GetString())
-            | _ -> Error (WrongKind (name, "text", place)))
+            | _ -> Error (RocketManifestError.WrongKind (name, "text", place)))
+
+    let private jsonNull = JsonDocument.Parse("null").RootElement
 
     let private optionalText (name:string) (element:JsonElement) =
         match property name element with
@@ -139,10 +145,11 @@ module RocketManifest =
         | ValueSome value when value.ValueKind = JsonValueKind.False -> ValueSome false
         | _ -> ValueNone
 
-    let private items (name:string) (element:JsonElement) =
+    let private items (name:string) (place:string) (element:JsonElement) =
         match property name element with
-        | ValueSome value when value.ValueKind = JsonValueKind.Array -> value.EnumerateArray() |> List.ofSeq
-        | _ -> []
+        | ValueNone -> Ok []
+        | ValueSome value when value.ValueKind = JsonValueKind.Array -> Ok (value.EnumerateArray() |> List.ofSeq)
+        | ValueSome _ -> Error (RocketManifestError.WrongKind (name, "a list", place))
 
     /// Reads every element and stops at the first error. The reader is given the position of the element, counting from 1, to say where an error is.
     let private readAll (read:int -> JsonElement -> Result<'T, RocketManifestError>) (elements:JsonElement list) =
@@ -196,7 +203,10 @@ module RocketManifest =
             |> Result.bind (fun attribute ->
                 text "type" place element
                 |> Result.bind (fun typeName ->
-                    required "default" place element
+                    // A codec with no default leaves the key out of the JSON, so a missing one is a null default
+                    property "default" element
+                    |> ValueOption.defaultValue jsonNull
+                    |> fun defaultValue -> Ok defaultValue
                     |> Result.map (fun defaultValue ->
                         { Name = name
                           Attribute = attribute
@@ -226,11 +236,15 @@ module RocketManifest =
     let private readComponent (position:int) (element:JsonElement) =
         text "tag" $"component {position}" element
         |> Result.bind (fun tag ->
-            readAll (readProp tag) (items "props" element)
+            let place = $"the component \"{tag}\""
+            items "props" place element
+            |> Result.bind (readAll (readProp tag))
             |> Result.bind (fun props ->
-                readAll (readSlot tag) (items "slots" element)
+                items "slots" place element
+                |> Result.bind (readAll (readSlot tag))
                 |> Result.bind (fun slots ->
-                    readAll (readEvent tag) (items "events" element)
+                    items "events" place element
+                    |> Result.bind (readAll (readEvent tag))
                     |> Result.map (fun events -> { Tag = tag; Props = props; Slots = slots; Events = events }))))
 
     let private supportedVersion = 1
@@ -238,32 +252,38 @@ module RocketManifest =
     let private readVersion (root:JsonElement) =
         required "version" "the manifest" root
         |> Result.bind (fun version ->
-            match version.ValueKind, version.TryGetInt32() with
-            | JsonValueKind.Number, (true, number) when number = supportedVersion -> Ok number
-            | JsonValueKind.Number, (true, number) -> Error (UnsupportedVersion (number, supportedVersion))
-            | _ -> Error (WrongKind ("version", "a number", "the manifest")))
+            match version.ValueKind with
+            | JsonValueKind.Number ->
+                match version.TryGetInt32() with
+                | true, number when number = supportedVersion -> Ok number
+                | true, number -> Error (RocketManifestError.UnsupportedVersion (number, supportedVersion))
+                | false, _ -> Error (RocketManifestError.WrongKind ("version", "a whole number", "the manifest"))
+            | _ -> Error (RocketManifestError.WrongKind ("version", "a number", "the manifest")))
 
     let private readGeneratedAt (root:JsonElement) =
         text "generatedAt" "the manifest" root
         |> Result.bind (fun generatedAt ->
             match DateTimeOffset.TryParse(generatedAt, CultureInfo.InvariantCulture, DateTimeStyles.None) with
             | true, moment -> Ok moment
-            | false, _ -> Error (WrongKind ("generatedAt", "a date", "the manifest")))
+            | false, _ -> Error (RocketManifestError.WrongKind ("generatedAt", "a date", "the manifest")))
 
     let private readComponents (root:JsonElement) =
         required "components" "the manifest" root
         |> Result.bind (fun components ->
             match components.ValueKind with
             | JsonValueKind.Array -> readAll readComponent (components.EnumerateArray() |> List.ofSeq)
-            | _ -> Error (WrongKind ("components", "a list", "the manifest")))
+            | _ -> Error (RocketManifestError.WrongKind ("components", "a list", "the manifest")))
 
     let private readDocument (root:JsonElement) =
-        readVersion root
-        |> Result.bind (fun version ->
-            readGeneratedAt root
-            |> Result.bind (fun generatedAt ->
-                readComponents root
-                |> Result.map (fun components -> { Version = version; GeneratedAt = generatedAt; Components = components })))
+        match root.ValueKind with
+        | JsonValueKind.Object ->
+            readVersion root
+            |> Result.bind (fun version ->
+                readGeneratedAt root
+                |> Result.bind (fun generatedAt ->
+                    readComponents root
+                    |> Result.map (fun components -> { Version = version; GeneratedAt = generatedAt; Components = components })))
+        | _ -> Error RocketManifestError.NotAnObject
 
     /// <summary>
     /// Reads the JSON that <c>publishRocketManifests</c> posted. It returns an error when the text is not JSON,
@@ -271,7 +291,13 @@ module RocketManifest =
     /// </summary>
     /// <param name="json">The body of the request</param>
     let parse (json:string) : Result<RocketManifestDocument, RocketManifestError> =
-        try
-            use document = JsonDocument.Parse json
-            readDocument document.RootElement
-        with :? JsonException as error -> Error (NotJson error.Message)
+        match isNull json with
+        | true -> Error (RocketManifestError.NotJson "there is no text to read")
+        | false ->
+            try
+                use document = JsonDocument.Parse json
+                readDocument document.RootElement
+            with
+            | :? JsonException as error -> Error (RocketManifestError.NotJson error.Message)
+            // A string with half of a surrogate pair is JSON that .NET cannot turn into text
+            | :? InvalidOperationException as error -> Error (RocketManifestError.NotJson error.Message)

@@ -8,7 +8,7 @@ open FsUnit.Xunit
 open Xunit
 
 module RocketTests =
-    let private renderAttr attr =
+    let private renderOnMyEl attr =
         Elem.create "my-el" [ attr ] []
         |> renderNode
 
@@ -25,9 +25,9 @@ module RocketTests =
 
     [<Fact>]
     let ``Rocket.root adds the __root modifier to a bind, computed or indicator`` () =
-        renderAttr (Rocket.root (Ds.bind "query"))
+        renderOnMyEl (Rocket.root (Ds.bind "query"))
         |> should equal """<my-el data-bind:query__root></my-el>"""
-        renderAttr (Rocket.root (Ds.computed (SignalPath.sp "total", "$a + $b")))
+        renderOnMyEl (Rocket.root (Ds.computed (SignalPath.sp "total", "$a + $b")))
         |> should equal """<my-el data-computed:total__root="$a + $b"></my-el>"""
 
     // Rocket builds each prop's attribute name with Datastar's kebab function (library/src/utils/text.ts).
@@ -51,61 +51,54 @@ module RocketTests =
     [<InlineData("p95Latency", "p-95-latency")>]
     [<InlineData("h1Title", "h-1-title")>]
     let ``Rocket props get the attribute name Rocket expects`` (propName: string, attribute: string) =
-        renderAttr (Rocket.propString (propName, "v"))
+        renderOnMyEl (Rocket.propString (propName, "v"))
         |> should equal $"""<my-el {attribute}="v"></my-el>"""
 
     // Prop values: each helper writes what the matching codec reads (library/src/rocket/codecs.ts)
 
     [<Fact>]
     let ``Rocket.propString escapes the value so it cannot break out of the attribute`` () =
-        renderAttr (Rocket.propString ("label", "say \"hi\" & <go>"))
+        renderOnMyEl (Rocket.propString ("label", "say \"hi\" & <go>"))
         |> should equal """<my-el label="say &quot;hi&quot; &amp; &lt;go&gt;"></my-el>"""
 
     [<Fact>]
     let ``Rocket.propNumber accepts any numeric type`` () =
-        renderAttr (Rocket.propNumber ("count", 5)) |> should equal """<my-el count="5"></my-el>"""
-        renderAttr (Rocket.propNumber ("ratio", 1.5)) |> should equal """<my-el ratio="1.5"></my-el>"""
-        renderAttr (Rocket.propNumber ("delta", -2L)) |> should equal """<my-el delta="-2"></my-el>"""
-        renderAttr (Rocket.propNumber ("price", 9.99m)) |> should equal """<my-el price="9.99"></my-el>"""
+        renderOnMyEl (Rocket.propNumber ("count", 5)) |> should equal """<my-el count="5"></my-el>"""
+        renderOnMyEl (Rocket.propNumber ("ratio", 1.5)) |> should equal """<my-el ratio="1.5"></my-el>"""
+        renderOnMyEl (Rocket.propNumber ("delta", -2L)) |> should equal """<my-el delta="-2"></my-el>"""
+        renderOnMyEl (Rocket.propNumber ("price", 9.99m)) |> should equal """<my-el price="9.99"></my-el>"""
 
     [<Fact>]
     let ``Rocket.propNumber ignores the current culture`` () =
-        // Built from the invariant culture so the test does not need ICU, which slim CI images lack
-        let commaDecimal = CultureInfo.InvariantCulture.Clone() :?> CultureInfo
-        commaDecimal.NumberFormat.NumberDecimalSeparator <- ","
-        let original = CultureInfo.CurrentCulture
-        try
-            CultureInfo.CurrentCulture <- commaDecimal
-            renderAttr (Rocket.propNumber ("ratio", 1.5))
-            |> should equal """<my-el ratio="1.5"></my-el>"""
-        finally
-            CultureInfo.CurrentCulture <- original
+        withCommaDecimalCulture (fun () ->
+            renderOnMyEl (Rocket.propNumber ("ratio", 1.5))
+            |> should equal """<my-el ratio="1.5"></my-el>""")
 
     [<Fact>]
     let ``Rocket.propBool writes false as well as true`` () =
-        renderAttr (Rocket.propBool ("open", true)) |> should equal """<my-el open="true"></my-el>"""
-        renderAttr (Rocket.propBool ("open", false)) |> should equal """<my-el open="false"></my-el>"""
+        renderOnMyEl (Rocket.propBool ("open", true)) |> should equal """<my-el open="true"></my-el>"""
+        renderOnMyEl (Rocket.propBool ("open", false)) |> should equal """<my-el open="false"></my-el>"""
 
     [<Fact>]
     let ``Rocket.propDate writes UTC ISO 8601 with milliseconds, as Date.toISOString does`` () =
         let value = DateTimeOffset(2026, 9, 21, 10, 30, 5, 120, TimeSpan.FromHours 2.0)
-        renderAttr (Rocket.propDate ("due", value))
+        renderOnMyEl (Rocket.propDate ("due", value))
         |> should equal """<my-el due="2026-09-21T08:30:05.120Z"></my-el>"""
 
     [<Fact>]
     let ``Rocket.propJson writes camelCase JSON and escapes it for the attribute`` () =
         // anonymous records order their fields alphabetically
-        renderAttr (Rocket.propJson ("point", {| X = 1; UserName = "a" |}))
+        renderOnMyEl (Rocket.propJson ("point", {| X = 1; UserName = "a" |}))
         |> should equal """<my-el point="{&quot;userName&quot;:&quot;a&quot;,&quot;x&quot;:1}"></my-el>"""
 
     [<Fact>]
     let ``Rocket.propJson writes arrays as JSON`` () =
-        renderAttr (Rocket.propJson ("items", [ 1; 2; 3 ]))
+        renderOnMyEl (Rocket.propJson ("items", [ 1; 2; 3 ]))
         |> should equal """<my-el items="[1,2,3]"></my-el>"""
 
     [<Fact>]
     let ``Rocket.propBin writes base64, which the browser decodes with atob`` () =
-        renderAttr (Rocket.propBin ("data", [| 1uy; 2uy; 3uy |]))
+        renderOnMyEl (Rocket.propBin ("data", [| 1uy; 2uy; 3uy |]))
         |> should equal """<my-el data="AQID"></my-el>"""
 
     // Template directives: Rocket always uses the attribute names data-for, data-if, data-else-if and data-else
@@ -140,3 +133,29 @@ module RocketTests =
     let ``Rocket.templateFor escapes the expression`` () =
         renderNode (Rocket.templateFor ("$$a.filter(x => x.n < 2 && x.s == \"q\")", []))
         |> should equal """<template data-for="$$a.filter(x =&gt; x.n &lt; 2 &amp;&amp; x.s == &quot;q&quot;)"></template>"""
+
+    // The typed overloads take text that is already safe for an attribute, so it must not be encoded a second time
+
+    [<Fact>]
+    let ``Rocket.templateIf with an expression does not encode the text of the expression twice`` () =
+        let condition = Expr.equal (Expr.read (Signal.rocket<string> "n")) (Expr.string "a&b\"c")
+        Elem.div [] [ Rocket.templateIf (condition, []) ] |> renderNode
+        |> should equal """<div><template data-if="($$n === 'a&amp;b&quot;c')"></template></div>"""
+
+    [<Fact>]
+    let ``Rocket.templateElseIf with an expression does not encode the text of the expression twice`` () =
+        let condition = Expr.equal (Expr.read (Signal.rocket<string> "n")) (Expr.string "a&b")
+        Elem.div [] [ Rocket.templateElseIf (condition, []) ] |> renderNode
+        |> should equal """<div><template data-else-if="($$n === 'a&amp;b')"></template></div>"""
+
+    [<Fact>]
+    let ``Rocket.forEach with an expression does not encode the text of the expression twice`` () =
+        let source = Expr.unsafeRaw<string list> "$$a && $$b"
+        Elem.div [] [ Rocket.forEach (source, fun _ _ -> []) ] |> renderNode
+        |> should equal """<div><template data-for="($$a &amp;&amp; $$b)"></template></div>"""
+
+    [<Fact>]
+    let ``The string overloads of the template directives encode the text they are given`` () =
+        Elem.div [] [ Rocket.templateIf ("$$a && $$b == \"x\"", []) ] |> renderNode
+        |> should equal """<div><template data-if="$$a &amp;&amp; $$b == &quot;x&quot;"></template></div>"""
+

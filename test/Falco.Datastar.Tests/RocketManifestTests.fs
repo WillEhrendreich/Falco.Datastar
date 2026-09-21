@@ -101,18 +101,18 @@ module RocketManifestTests =
     [<Fact>]
     let ``RocketManifest.parse returns the version it reads and the version it got when they differ`` () =
         RocketManifest.parse """{"version":2,"generatedAt":"2026-01-01T00:00:00.000Z","components":[]}"""
-        |> should equal (Error (UnsupportedVersion (2, 1)) : Result<RocketManifestDocument, RocketManifestError>)
+        |> should equal (Error (RocketManifestError.UnsupportedVersion (2, 1)) : Result<RocketManifestDocument, RocketManifestError>)
 
     [<Fact>]
     let ``RocketManifest.parse returns an error for text that is not JSON`` () =
         match RocketManifest.parse "not json" with
-        | Error (NotJson _) -> ()
+        | Error (RocketManifestError.NotJson _) -> ()
         | other -> failwith $"expected NotJson, got %A{other}"
 
     [<Fact>]
     let ``RocketManifest.parse names the property that is missing`` () =
         RocketManifest.parse """{"version":1,"generatedAt":"2026-01-01T00:00:00.000Z"}"""
-        |> should equal (Error (Missing ("components", "the manifest")) : Result<RocketManifestDocument, RocketManifestError>)
+        |> should equal (Error (RocketManifestError.Missing ("components", "the manifest")) : Result<RocketManifestDocument, RocketManifestError>)
 
     [<Fact>]
     let ``Request.getRocketManifests reads the body of a POST`` () =
@@ -129,17 +129,17 @@ module RocketManifestTests =
     [<Fact>]
     let ``RocketManifest.parse returns an error, and does not throw, when components is not a list`` () =
         RocketManifest.parse """{"version":1,"generatedAt":"2026-01-01T00:00:00.000Z","components":5}"""
-        |> should equal (Error (WrongKind ("components", "a list", "the manifest")) : Result<RocketManifestDocument, RocketManifestError>)
+        |> should equal (Error (RocketManifestError.WrongKind ("components", "a list", "the manifest")) : Result<RocketManifestDocument, RocketManifestError>)
 
     [<Fact>]
     let ``RocketManifest.parse names the prop and the component when a prop property is missing`` () =
         RocketManifest.parse (wrap """{"tag":"my-card","props":[{"name":"count","type":"number","default":0}]}""")
-        |> should equal (Error (Missing ("attribute", "the prop \"count\" of my-card")) : Result<RocketManifestDocument, RocketManifestError>)
+        |> should equal (Error (RocketManifestError.Missing ("attribute", "the prop \"count\" of my-card")) : Result<RocketManifestDocument, RocketManifestError>)
 
     [<Fact>]
     let ``RocketManifest.parse gives the position of a prop that has no name`` () =
         RocketManifest.parse (wrap """{"tag":"my-card","props":[{"name":"a","attribute":"a","type":"string","default":""},{"attribute":"b","type":"string","default":""}]}""")
-        |> should equal (Error (Missing ("name", "prop 2 of my-card")) : Result<RocketManifestDocument, RocketManifestError>)
+        |> should equal (Error (RocketManifestError.Missing ("name", "prop 2 of my-card")) : Result<RocketManifestDocument, RocketManifestError>)
 
     [<Fact>]
     let ``Request.getRocketManifests refuses a body that is larger than one mebibyte`` () =
@@ -147,13 +147,130 @@ module RocketManifestTests =
         ctx.Request.Method <- "POST"
         ctx.Request.Body <- new MemoryStream(Encoding.UTF8.GetBytes (String('x', 1024 * 1024 + 1)))
         (Request.getRocketManifests ctx).GetAwaiter().GetResult()
-        |> should equal (Error (TooLarge (1024 * 1024)) : Result<RocketManifestDocument, RocketManifestError>)
+        |> should equal (Error (RocketManifestError.TooLarge (1024 * 1024)) : Result<RocketManifestDocument, RocketManifestError>)
 
     [<Fact>]
     let ``RocketManifestError.Message says what is wrong and what to do about it`` () =
-        (UnsupportedVersion (2, 1)).Message |> should haveSubstring "reads Rocket manifest version 1, but the document is version 2"
-        (UnsupportedVersion (2, 1)).Message |> should haveSubstring "Update Falco.Datastar"
-        (Missing ("attribute", "the prop \"count\" of my-card")).Message |> should equal "The manifest has no \"attribute\" in the prop \"count\" of my-card"
-        (WrongKind ("components", "a list", "the manifest")).Message |> should equal "The \"components\" in the manifest is not a list"
-        (TooLarge (1024 * 1024)).Message |> should haveSubstring "larger than 1 MiB"
-        (NotJson "bad").Message |> should equal "The manifest is not valid JSON: bad"
+        (RocketManifestError.UnsupportedVersion (2, 1)).Message |> should haveSubstring "reads Rocket manifest version 1, but the document is version 2"
+        (RocketManifestError.UnsupportedVersion (2, 1)).Message |> should haveSubstring "Update Falco.Datastar"
+        (RocketManifestError.Missing ("attribute", "the prop \"count\" of my-card")).Message |> should equal "The manifest has no \"attribute\" in the prop \"count\" of my-card"
+        (RocketManifestError.WrongKind ("components", "a list", "the manifest")).Message |> should equal "The \"components\" in the manifest is not a list"
+        (RocketManifestError.TooLarge (1024 * 1024)).Message |> should haveSubstring "larger than 1 MiB"
+        (RocketManifestError.NotJson "bad").Message |> should equal "The manifest is not valid JSON: bad"
+        RocketManifestError.NotAnObject.Message |> should haveSubstring "must be a JSON object"
+
+    let private errorOf (result:Result<RocketManifestDocument, RocketManifestError>) =
+        match result with
+        | Error error -> error
+        | Ok _ -> failwith "expected an error"
+
+    let private propOf (props:string) =
+        match RocketManifest.parse (wrap $"""{{"tag":"a-b","props":[{props}]}}""") with
+        | Ok document -> document.Components.Head.Props.Head
+        | Error error -> failwith error.Message
+
+    [<Fact>]
+    let ``RocketManifest.parse reads a prop that is required`` () =
+        (propOf """{"name":"p","attribute":"p","type":"string","default":"","required":true}""").Required |> should equal true
+
+    [<Fact>]
+    let ``RocketManifest.parse reads every codec name, and keeps one it does not know`` () =
+        let typeOf name = (propOf $"""{{"name":"p","attribute":"p","type":"{name}","default":null}}""").Type
+        typeOf "tuple" |> should equal RocketPropType.Tuple
+        typeOf "js" |> should equal RocketPropType.Js
+        typeOf "custom" |> should equal RocketPropType.Custom
+        typeOf "binary" |> should equal RocketPropType.Binary
+        typeOf "hologram" |> should equal (RocketPropType.Other "hologram")
+
+    [<Fact>]
+    let ``RocketManifest.parse keeps an event kind it does not know`` () =
+        match RocketManifest.parse (wrap """{"tag":"a-b","events":[{"name":"x","kind":"weird"}]}""") with
+        | Ok document -> document.Components.Head.Events.Head.Kind |> should equal (RocketEventKind.Other "weird")
+        | Error error -> failwith error.Message
+
+    [<Fact>]
+    let ``RocketManifest.parse reads a prop whose codec has no default as a null default`` () =
+        // A codec whose decode gives undefined for a missing attribute leaves the key out of the JSON
+        (propOf """{"name":"p","attribute":"p","type":"custom"}""").Default.ValueKind |> should equal JsonValueKind.Null
+
+    [<Fact>]
+    let ``RocketManifest.parse says which entry has no name`` () =
+        errorOf (RocketManifest.parse (wrap """{"tag":"a-b","slots":[{"name":"x"},{"description":"d"}]}"""))
+        |> should equal (RocketManifestError.Missing ("name", "slot 2 of a-b"))
+        errorOf (RocketManifest.parse (wrap """{"tag":"a-b","events":[{"kind":"event"}]}"""))
+        |> should equal (RocketManifestError.Missing ("name", "event 1 of a-b"))
+        errorOf (RocketManifest.parse (wrap """{"props":[]}"""))
+        |> should equal (RocketManifestError.Missing ("tag", "component 1"))
+
+    [<Fact>]
+    let ``RocketManifest.parse refuses props, slots and events that are not lists, instead of reading them as empty`` () =
+        errorOf (RocketManifest.parse (wrap """{"tag":"a-b","props":"oops"}"""))
+        |> should equal (RocketManifestError.WrongKind ("props", "a list", "the component \"a-b\""))
+        errorOf (RocketManifest.parse (wrap """{"tag":"a-b","slots":{}}"""))
+        |> should equal (RocketManifestError.WrongKind ("slots", "a list", "the component \"a-b\""))
+        errorOf (RocketManifest.parse (wrap """{"tag":"a-b","events":5}"""))
+        |> should equal (RocketManifestError.WrongKind ("events", "a list", "the component \"a-b\""))
+
+    [<Fact>]
+    let ``RocketManifest.parse says what is wrong with the version and the time`` () =
+        errorOf (RocketManifest.parse """{"version":"1","generatedAt":"2026-01-01T00:00:00Z","components":[]}""")
+        |> should equal (RocketManifestError.WrongKind ("version", "a number", "the manifest"))
+        errorOf (RocketManifest.parse """{"version":1.5,"generatedAt":"2026-01-01T00:00:00Z","components":[]}""")
+        |> should equal (RocketManifestError.WrongKind ("version", "a whole number", "the manifest"))
+        errorOf (RocketManifest.parse """{"version":1,"generatedAt":"yesterday","components":[]}""")
+        |> should equal (RocketManifestError.WrongKind ("generatedAt", "a date", "the manifest"))
+        errorOf (RocketManifest.parse """{"version":1,"generatedAt":5,"components":[]}""")
+        |> should equal (RocketManifestError.WrongKind ("generatedAt", "text", "the manifest"))
+
+    [<Fact>]
+    let ``RocketManifest.parse refuses JSON that is not an object`` () =
+        for json in [ "[]"; "null"; "5"; "\"text\"" ] do
+            errorOf (RocketManifest.parse json) |> should equal RocketManifestError.NotAnObject
+
+    [<Fact>]
+    let ``RocketManifest.parse returns an error, and does not throw, for an empty body, no text or a broken string`` () =
+        (match errorOf (RocketManifest.parse "") with | RocketManifestError.NotJson _ -> true | _ -> false) |> should equal true
+        errorOf (RocketManifest.parse null) |> should equal (RocketManifestError.NotJson "there is no text to read")
+        // Half of a surrogate pair is JSON, but .NET cannot turn it into text
+        (match errorOf (RocketManifest.parse """{"version":1,"generatedAt":"\ud800","components":[]}""") with | RocketManifestError.NotJson _ -> true | _ -> false)
+        |> should equal true
+
+    /// A stream that has as many bytes as you ask for, and counts how many were read
+    type private EndlessStream(length:int64) =
+        inherit Stream()
+        let mutable read = 0L
+        member _.BytesRead = read
+        override _.CanRead = true
+        override _.CanSeek = false
+        override _.CanWrite = false
+        override _.Length = length
+        override _.Position with get () = read and set _ = raise (NotSupportedException())
+        override _.Flush () = ()
+        override _.Seek (_, _) = raise (NotSupportedException())
+        override _.SetLength _ = raise (NotSupportedException())
+        override _.Write (_, _, _) = raise (NotSupportedException())
+        override _.Read (buffer:byte[], offset:int, count:int) =
+            let available = int (min (int64 count) (length - read))
+            Array.Fill(buffer, byte 'x', offset, available)
+            read <- read + int64 available
+            available
+
+    [<Fact>]
+    let ``Request.getRocketManifests stops reading a large body soon after the limit`` () =
+        let ctx = DefaultHttpContext()
+        ctx.Request.Method <- "POST"
+        let body = new EndlessStream(10L * 1024L * 1024L)
+        ctx.Request.Body <- body
+        (Request.getRocketManifests ctx).GetAwaiter().GetResult()
+        |> should equal (Error (RocketManifestError.TooLarge (1024 * 1024)) : Result<RocketManifestDocument, RocketManifestError>)
+        // One mebibyte and the chunk that went over it
+        body.BytesRead |> should be (lessThanOrEqualTo (1024L * 1024L + 8192L))
+
+    [<Fact>]
+    let ``Request.getRocketManifests reads a body of exactly one mebibyte`` () =
+        let ctx = DefaultHttpContext()
+        ctx.Request.Method <- "POST"
+        ctx.Request.Body <- new EndlessStream(1024L * 1024L)
+        match (Request.getRocketManifests ctx).GetAwaiter().GetResult() with
+        | Error (RocketManifestError.NotJson _) -> ()
+        | other -> failwith $"expected the body to be read and refused as not JSON, got %A{other}"

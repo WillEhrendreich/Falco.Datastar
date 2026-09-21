@@ -133,7 +133,7 @@ module DsTests =
         |> should equal "@toggleAll()"
 
     [<Fact>]
-    let ``Ds.peek wraps the expression in a function for @peek`` () =
+    let ``Ds.peek wraps the expression in a function for the peek action`` () =
         Ds.peek "$count"
         |> should equal "@peek(() => $count)"
 

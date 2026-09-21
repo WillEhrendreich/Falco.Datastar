@@ -6,9 +6,9 @@ open Falco.Routing
 open Falco.Datastar
 open Microsoft.AspNetCore.Builder
 
-// Rocket components are defined in JavaScript; the server renders the tags and the parts of the contract it owns.
-// `my-counter` is a shadow-DOM component: the server sends its props as attributes, and patches them to change it.
-// `my-toggle` is a light-DOM component: the server renders its children, which use its local signals and actions.
+// Rocket components are written in JavaScript. The server renders their tags, props and children.
+// `my-counter` uses shadow DOM. The server sends its props as attributes and changes them by patching the element.
+// `my-toggle` uses light DOM. The server renders its children, which use the component's own signals and actions.
 let components = $"""
 import {{ rocket }} from '{Ds.rocketCdnSrc}'
 

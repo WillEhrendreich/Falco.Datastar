@@ -63,9 +63,8 @@ wapp.UseRouting()
     .Run()
 ```
 
-`Ds.cdnScript` loads the standard Datastar bundle from the jsDelivr CDN, pinned to the release in `Ds.datastarVersion` (currently Datastar 1.0.4).
-If you use [Rocket](https://github.com/starfederation/datastar/tree/v1.0.4/library/src/rocket), Datastar's web-component layer, use `Ds.rocketCdnScript` instead; it loads the same release with Rocket included.
-Load one or the other, not both.
+`Ds.cdnScript` loads Datastar from the jsDelivr CDN. It is fixed to the release named in `Ds.datastarVersion`, currently Datastar 1.0.4.
+To use [Rocket](https://github.com/starfederation/datastar/tree/v1.0.4/library/src/rocket), Datastar's web components, load `Ds.rocketCdnScript` instead. It is the same release with Rocket included, so load one script or the other, not both.
 
 Now, let's incorporate Datastar into our Falco application. First, we'll define a simple route that returns a button that, when clicked, will
 merge an HTML fragment from a GET request.
@@ -241,8 +240,8 @@ the signal value is automatically converted to match the original (see the [docu
 Elem.input [ Attr.type' "text"; Ds.bind "firstName" ]
 ```
 
-For custom elements and web components, `Ds.bindProp` binds the signal to a named element property, and can name the events that sync the property back into the signal.
-`Ds.bindEvent` only overrides the events. Property names are kebab-cased in the output, because the HTML parser lowercases attribute names and Datastar camel-cases them again.
+For custom elements and web components, `Ds.bindProp` binds a signal to a named property of the element. You can also list the events that copy the property back into the signal.
+`Ds.bindEvent` changes only the events. Property names come out in kebab-case, because the HTML parser lowercases attribute names, and Datastar turns them back into camelCase.
 
 ```fsharp
 Elem.create "my-slider" [ Ds.bindProp (sp"volume", "value", [ "change" ]) ] []
@@ -443,7 +442,7 @@ Elem.button [ Ds.onClick (Ds.delete "/delete") ] [ Text.raw "Delete" ]
 Elem.button [ Ds.onClick (Ds.query "/query") ] [ Text.raw "Query" ]
 ```
 
-`@query` sends the HTTP `QUERY` method: a safe, idempotent request that carries the signals in its body, like a `@get` that isn't limited to the query string.
+`@query` sends an HTTP `QUERY` request. Like a `@get`, it does not change anything on the server, but it sends the signals in the request body instead of the query string.
 
 The majority of the above examples are fired from a button click, but remember that these are
 [Datastar expressions](https://data-star.dev/guide/datastar_expressions) and any [event or trigger](#_events-and-triggers_)
@@ -459,12 +458,11 @@ Elem.button [ Ds.onClick (Ds.get ("/endpoint",
                                  )) ] [ Text.raw "Push the Button" ]
 ```
 
-Options that are new since Datastar 1.0:
+These options are also available in Datastar 1.0.4:
 
-- `RequestCancellation = Cleanup` also cancels the request when the element it is on is removed from the DOM.
-- `ContentType = CustomJson obj` sends the object as the request payload, in place of the signals.
-- `ResponseOverrides` replaces what the server sent in the events of the response: `OverrideElements` overrides the
-  selector, mode, and view transition of patch-elements events, and `OverrideSignals` overrides `onlyIfMissing` of patch-signals events.
+- `RequestCancellation = Cleanup` cancels the request when the element it is on is removed from the page.
+- `ContentType = CustomJson obj` sends the object as the request body, instead of the signals.
+- `ResponseOverrides` replaces values the server put in its response events. `OverrideElements` replaces the selector, mode and view transition of patch-elements events. `OverrideSignals` replaces `onlyIfMissing` on patch-signals events.
 
 ```fsharp
 Elem.button [ Ds.onClick (Ds.get ("/endpoint",
@@ -478,9 +476,9 @@ Elem.button [ Ds.onClick (Ds.get ("/endpoint",
 
 ### [`@setAll`](https://data-star.dev/reference/actions#setall)
 
-Sets all the signals that start with the prefix to the value provided in the second argument.
-This is useful for setting all the values of a signal namespace at once. Strings are quoted; numbers and booleans are not.
-Since Datastar 1.0 the action takes the value first and a filter second, and `Ds.setAll` builds that filter from the prefix.
+Sets every signal whose path starts with the prefix to the value in the second argument. Use it to set a whole group of signals at once.
+Strings are quoted in the expression, and numbers and booleans are not.
+The Datastar action itself takes the value first and a filter second, and `Ds.setAll` builds that filter from the prefix.
 
 ```fsharp
 Elem.button [ Ds.onClick (Ds.setAll ("foo.", true)) ] [ Text.raw "Check all" ]
@@ -490,12 +488,12 @@ Elem.button [ Ds.onClick (Ds.setAll ("foo.", true)) ] [ Text.raw "Check all" ]
 <button data-on:click="@setAll(true, { include: /^foo\./ })">Check all</button>
 ```
 
-`Ds.setAllFiltered` takes any `SignalsFilter` instead of a prefix, or `SignalsFilter.None` to set every signal.
+`Ds.setAllFiltered` takes a `SignalsFilter` instead of a prefix. Pass `SignalsFilter.None` to set every signal.
 
 ### [`@toggleAll`](https://data-star.dev/reference/actions#toggleall)
 
 Toggles all the signals that start with the prefix. This is useful for toggling all the values of a signal namespace at once.
-`Ds.toggleAllFiltered` takes any `SignalsFilter` instead of a prefix.
+`Ds.toggleAllFiltered` takes a `SignalsFilter` instead of a prefix.
 
 ```fsharp
 Elem.button [ Ds.onClick (Ds.toggleAll "foo.") ] [ Text.raw "Toggle all" ]
@@ -503,7 +501,7 @@ Elem.button [ Ds.onClick (Ds.toggleAll "foo.") ] [ Text.raw "Toggle all" ]
 
 ### [`@peek`](https://data-star.dev/reference/actions#peek)
 
-Evaluates an expression without subscribing to the signals it reads. Useful in `Ds.effect` when a signal should be read but must not re-run the effect.
+Evaluates an expression without subscribing to the signals it reads. Use it in `Ds.effect` to read a signal without re-running the effect when that signal changes.
 
 ```fsharp
 Elem.div [ Ds.effect $"""$last = {Ds.peek "$count"}""" ] []
@@ -545,28 +543,27 @@ Elem.pre [ Ds.jsonSignalsOptions (SignalsFilter.Include "/foo/") ] []
 
 ## _Rocket Components_
 
-[Rocket](https://github.com/starfederation/datastar/tree/v1.0.4/library/src/rocket) is Datastar's web-component layer.
-A component is defined in JavaScript with `rocket(tag, { props, setup, render })`; the server renders the tag and the parts of the contract the server owns:
-the props the component reads from its attributes, and the signals, actions and template directives its children can use.
-Load Datastar with `Ds.rocketCdnScript`. Nothing in `Rocket` sets a value you did not pass, so Rocket's own defaults apply.
+[Rocket](https://github.com/starfederation/datastar/tree/v1.0.4/library/src/rocket) is Datastar's way of writing web components.
+You write a component in JavaScript with `rocket(tag, { props, setup, render })`, and the server renders the component's tag, its props and its children.
+Load Datastar with `Ds.rocketCdnScript` to use it. The helpers below write only the values you pass, so Rocket's own defaults still apply.
 
-The [RocketComponents example](examples/RocketComponents) is a small app that uses all of the following.
+The [RocketComponents example](examples/RocketComponents) is a small app that uses everything described here.
 
 ### `Rocket.propString | propNumber | propBool | propDate | propJson | propBin`
 
-Rocket reads each prop from the attribute named after it and decodes it with the [codec](https://github.com/starfederation/datastar/blob/v1.0.4/library/src/rocket/codecs.ts) the component declared.
-Each helper writes what the matching codec decodes:
+Rocket reads each prop from the attribute with the prop's name, and decodes it with the [codec](https://github.com/starfederation/datastar/blob/v1.0.4/library/src/rocket/codecs.ts) the component chose.
+Each helper writes the format its codec reads:
 
-| Helper | Codec | Written as |
+| Helper | Codec | What it writes |
 | --- | --- | --- |
-| `Rocket.propString` | `string` | the text, escaped for the attribute |
-| `Rocket.propNumber` | `number` | any numeric type, with the invariant culture (`1.5`, never `1,5`) |
-| `Rocket.propBool` | `bool` | `true` or `false`, always written, because leaving it out means the prop's default, which may be true |
+| `Rocket.propString` | `string` | the text, escaped for use in an attribute |
+| `Rocket.propNumber` | `number` | any number type, with the invariant culture (`1.5`, never `1,5`) |
+| `Rocket.propBool` | `bool` | `true` or `false`, always written, because a missing attribute means the prop's default, which might be true |
 | `Rocket.propDate` | `date` | UTC ISO 8601 with milliseconds, like `Date.toISOString()` |
-| `Rocket.propJson` | `json`, `array`, `object`, `tuple`, `oneOf` | camelCase JSON, or the options you pass |
+| `Rocket.propJson` | `json`, `array`, `object`, `tuple`, `oneOf` | camelCase JSON, or JSON made with the options you pass |
 | `Rocket.propBin` | `bin` | base64 |
 
-The attribute name is the prop name the way Rocket [derives it](https://github.com/starfederation/datastar/blob/v1.0.4/library/src/utils/text.ts): `maxCount` is `max-count`, `innerHTML` is `inner-html`, and `pos3d` is `pos-3-d`.
+The attribute name is the prop name converted the way Rocket [converts it](https://github.com/starfederation/datastar/blob/v1.0.4/library/src/utils/text.ts): `maxCount` becomes `max-count`, `innerHTML` becomes `inner-html`, and `pos3d` becomes `pos-3-d`.
 
 ```fsharp
 Elem.create "my-counter"
@@ -581,7 +578,7 @@ Elem.create "my-counter"
 <my-counter id="counter" label="Clicks" step="1" count="0"></my-counter>
 ```
 
-To change a prop from the server, patch the element (the same `id`) with new attribute values. Rocket decodes them and re-renders the component.
+To change a prop from the server, patch the element that has the same `id`, with new attribute values. Rocket reads the new values and renders the component again.
 
 ```fsharp
 let handleChange : HttpHandler = fun ctx ->
@@ -590,8 +587,8 @@ let handleChange : HttpHandler = fun ctx ->
 
 ### `Rocket.local | Rocket.call | Rocket.root`
 
-Children of a light-DOM component (`mode: 'light'`), and the component's own render, can use signals and actions that belong to one instance of the component.
-Rocket rewrites `$$name` to a path that is unique to the instance, so two instances do not share it, and `@name(...)` calls an action registered with `action('name', fn)` in the component's `setup`, falling back to Datastar's global actions.
+The children of a light-DOM component (`mode: 'light'`), and the component's own render output, can use signals and actions that belong to one instance of the component.
+Rocket rewrites `$$name` into a path that is unique to that instance, so two instances do not share it. It rewrites `@name(...)` into a call to the action registered with `action('name', fn)` in the component's `setup`, or, if there is none, into a call to the Datastar action with that name.
 
 ```fsharp
 Elem.create "my-toggle" [ Attr.id "toggle" ] [
@@ -600,8 +597,8 @@ Elem.create "my-toggle" [ Attr.id "toggle" ] [
 ]
 ```
 
-Inside a component, Rocket also scopes the signal a `Ds.bind`, `Ds.computed`, `Ds.indicator` or `Ds.ref` names, and the signals a `Ds.signal` creates, to the instance.
-`Rocket.root` opts a bind, computed, indicator or ref out, so it refers to the page's signal instead. It has no effect on `Ds.signal`, which Rocket always scopes ([source](https://github.com/starfederation/datastar/blob/v1.0.4/library/src/rocket/template.ts#L467-L481)).
+Inside a component, Rocket ties the signals named by `Ds.bind`, `Ds.computed`, `Ds.indicator` and `Ds.ref`, and the signals created by `Ds.signal`, to the instance.
+`Rocket.root` makes a bind, computed, indicator or ref use the page's signal instead. It does nothing to `Ds.signal`, because Rocket always ties those to the instance ([source](https://github.com/starfederation/datastar/blob/v1.0.4/library/src/rocket/template.ts#L467-L481)).
 
 ```fsharp
 Elem.input [ Rocket.root (Ds.bind "query") ]   // <input data-bind:query__root>: binds the page's $query
@@ -610,9 +607,9 @@ Elem.input [ Ds.bind "note" ]                   // binds this instance's $$note
 
 ### `Rocket.templateFor | templateIf | templateElseIf | templateElse`
 
-Rocket adds template directives that work on `<template>` elements: [`data-for`](https://github.com/starfederation/datastar/blob/v1.0.4/library/src/rocket/for.ts) repeats its content for each item of an expression,
-and [`data-if`, `data-else-if` and `data-else`](https://github.com/starfederation/datastar/blob/v1.0.4/library/src/rocket/conditional.ts) render one branch of a chain.
-Rocket calls the item `item` and the index `i` unless you name them, and it always looks for the attributes `data-for`, `data-if`, `data-else-if` and `data-else`, whatever prefix you have configured.
+Rocket adds directives that go on `<template>` elements. [`data-for`](https://github.com/starfederation/datastar/blob/v1.0.4/library/src/rocket/for.ts) repeats its content for each item in an expression.
+[`data-if`, `data-else-if` and `data-else`](https://github.com/starfederation/datastar/blob/v1.0.4/library/src/rocket/conditional.ts) render one branch of a chain.
+Rocket calls the item `item` and the index `i` unless you give other names. It always looks for the attributes `data-for`, `data-if`, `data-else-if` and `data-else`, even if you set a different attribute prefix.
 
 ```fsharp
 Elem.ul [] [

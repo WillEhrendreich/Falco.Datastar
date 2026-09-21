@@ -15,7 +15,7 @@ type Ds =
     static member datastarVersion = "v1.0.4"
 
     /// <summary>
-    /// The standard Datastar bundle on the jsDelivr CDN, at <see cref="datastarVersion"/>
+    /// The standard Datastar script on the jsDelivr CDN, for the release in <see cref="datastarVersion"/>
     /// </summary>
     static member cdnSrc =
         $"https://cdn.jsdelivr.net/gh/starfederation/datastar@{Ds.datastarVersion}/bundles/datastar.js"
@@ -28,8 +28,8 @@ type Ds =
         Elem.script [ Attr.type' "module"; Attr.src Ds.cdnSrc ] []
 
     /// <summary>
-    /// The Datastar bundle that includes Rocket, Datastar's web-component layer, on the jsDelivr CDN, at <see cref="datastarVersion"/>.
-    /// It is a superset of <see cref="cdnSrc"/>; load one or the other, not both.
+    /// The Datastar script that includes Rocket (Datastar's web components) on the jsDelivr CDN, for the release in <see cref="datastarVersion"/>.
+    /// It contains everything in <see cref="cdnSrc"/>, so load this one or that one, not both.
     /// </summary>
     static member rocketCdnSrc =
         $"https://cdn.jsdelivr.net/gh/starfederation/datastar@{Ds.datastarVersion}/bundles/datastar-rocket.js"
@@ -96,12 +96,12 @@ type Ds =
 
     /// <summary>
     /// Binds a signal to a property of a custom element or web component, instead of its default value or attribute.
-    /// The property name is kebab-cased because the HTML parser lowercases attribute names; Datastar camel-cases it again.
+    /// The property name is written in kebab-case, because the HTML parser lowercases attribute names, and Datastar turns it back into camelCase.
     /// https://data-star.dev/reference/attributes#data-bind
     /// </summary>
     /// <param name="signalPath">The signal to bind to</param>
     /// <param name="propName">The element property to bind, e.g. "checked" or "someProp"</param>
-    /// <param name="events">The events that sync the property into the signal; when omitted, Datastar uses the element's default events</param>
+    /// <param name="events">The events that copy the property into the signal. If you leave this out, Datastar uses the element's default events</param>
     /// <returns>Attribute</returns>
     static member bindProp (signalPath:SignalPath, propName:string, ?events:string list) =
         DsAttr.start "bind"
@@ -111,12 +111,12 @@ type Ds =
         |> DsAttr.create
 
     /// <summary>
-    /// Binds a signal to an element, syncing it into the signal on the given events instead of the element's default events.
-    /// Event names are lowercased by the HTML parser, so custom events must be lowercase to be listed here.
+    /// Binds a signal to an element and copies the element's value into the signal on the events you list, instead of its default events.
+    /// The HTML parser lowercases attribute names, so a custom event name must be all lowercase to work here.
     /// https://data-star.dev/reference/attributes#data-bind
     /// </summary>
     /// <param name="signalPath">The signal to bind to</param>
-    /// <param name="events">The events that sync the element into the signal, e.g. [ "input"; "change" ]</param>
+    /// <param name="events">The events that copy the element's value into the signal, e.g. [ "input"; "change" ]</param>
     /// <returns>Attribute</returns>
     static member bindEvent (signalPath:SignalPath, events:string list) =
         DsAttr.start "bind"
@@ -469,10 +469,10 @@ type Ds =
         Ds.backendAction (options |> Option.toValueOption) (Query url)
 
     /// <summary>
-    /// @setAll(), set all the signals matching the filter to the value provided; every signal if there is no filter.
+    /// @setAll(): sets every signal that matches the filter to the value. With no filter, it sets every signal.
     /// https://data-star.dev/reference/actions#setall
     /// </summary>
-    /// <param name="value">Value to set; strings are quoted, numbers and booleans are not</param>
+    /// <param name="value">The value to set. Strings are quoted in the expression; numbers and booleans are not</param>
     /// <param name="signalsFilter">Regex of signal paths to be included and excluded</param>
     /// <returns>Expression</returns>
     static member setAllFiltered<'T> (value:'T, signalsFilter:SignalsFilter) =
@@ -485,7 +485,7 @@ type Ds =
     /// https://data-star.dev/reference/actions#setall
     /// </summary>
     /// <param name="signalsPathPrefix">All signals to set that have this prefix, e.g. 'foo.'</param>
-    /// <param name="value">Value to set; strings are quoted, numbers and booleans are not</param>
+    /// <param name="value">The value to set. Strings are quoted in the expression; numbers and booleans are not</param>
     /// <returns>Expression</returns>
     static member setAll<'T> (signalsPathPrefix:string, value:'T) =
         Ds.setAllFiltered (value, SignalsFilter.Prefix signalsPathPrefix)
@@ -500,7 +500,7 @@ type Ds =
         Ds.toggleAllFiltered (SignalsFilter.Prefix signalsPathPrefix)
 
     /// <summary>
-    /// @toggleAll(), toggle all the signals matching the filter; every signal if there is no filter.
+    /// @toggleAll(): toggles every signal that matches the filter. With no filter, it toggles every signal.
     /// https://data-star.dev/reference/actions#toggleall
     /// </summary>
     /// <param name="signalsFilter">Regex of signal paths to be included and excluded</param>
@@ -511,8 +511,8 @@ type Ds =
         | false -> $"@toggleAll({signalsFilter |> SignalsFilter.Serialize |> Js.attrEncode})"
 
     /// <summary>
-    /// @peek(), evaluate the expression without subscribing to the signals it reads.
-    /// Useful in Ds.effect and Ds.computed when a signal should be read but not tracked.
+    /// @peek(): evaluates the expression without subscribing to the signals it reads.
+    /// Use it in Ds.effect or Ds.computed to read a signal without re-running when that signal changes.
     /// https://data-star.dev/reference/actions#peek
     /// </summary>
     /// <param name="expression">Expression to evaluate, https://data-star.dev/guide/datastar_expressions</param>

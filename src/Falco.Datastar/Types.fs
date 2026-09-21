@@ -87,7 +87,7 @@ type BackendAction =
     | Put of url:string
     | Patch of url:string
     | Delete of url:string
-    /// The HTTP QUERY method: a safe, idempotent request that carries a body
+    /// The HTTP QUERY method. Like GET, it is safe to repeat, but it can carry a body
     | Query of url:string
 
 type ContentType =
@@ -160,11 +160,11 @@ type ElementsOverrides =
     with
     static member None = { Selector = ValueNone; Mode = ValueNone; UseViewTransition = ValueNone }
 
-/// Overrides for the events a backend action receives; the client applies them regardless of what the server sent
+/// Values that replace what the server sends in the events a backend action receives. The browser applies them whatever the server said
 type ResponseOverrides =
     /// Override how patch-elements events are applied
     | OverrideElements of ElementsOverrides
-    /// Override whether patch-signals events only merge signals that are missing
+    /// Override whether patch-signals events merge only the signals that do not exist yet
     | OverrideSignals of onlyIfMissing:bool
     with
     static member internal Serialize (responseOverrides:ResponseOverrides) =
@@ -195,7 +195,7 @@ type RequestOptions = {
 
       /// Whether to keep the connection open when the page is hidden. Useful for dashboards
       /// but can cause a drain on battery life and other resources when enabled.
-      /// Unset by default, so Datastar decides: false for @get, true for the other actions.
+      /// Not set by default, so Datastar chooses: false for @get and true for the other actions.
       OpenWhenHidden: bool voption
 
       /// Determines on what to retry; auto, error, always, never

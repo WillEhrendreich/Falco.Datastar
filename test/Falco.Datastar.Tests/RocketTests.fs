@@ -30,8 +30,8 @@ module RocketTests =
         renderAttr (Rocket.root (Ds.computed (SignalPath.sp "total", "$a + $b")))
         |> should equal """<my-el data-computed:total__root="$a + $b"></my-el>"""
 
-    // Prop attribute names: Rocket derives them with Datastar's kebab (library/src/utils/text.ts).
-    // Expected values below were produced by running that function, not by this library.
+    // Rocket builds each prop's attribute name with Datastar's kebab function (library/src/utils/text.ts).
+    // The expected values below came from running that function, not from this library.
 
     [<Theory>]
     [<InlineData("count", "count")>]
@@ -54,7 +54,7 @@ module RocketTests =
         renderAttr (Rocket.propString (propName, "v"))
         |> should equal $"""<my-el {attribute}="v"></my-el>"""
 
-    // Prop values: each encoder produces what the matching codec decodes (library/src/rocket/codecs.ts)
+    // Prop values: each helper writes what the matching codec reads (library/src/rocket/codecs.ts)
 
     [<Fact>]
     let ``Rocket.propString escapes the value so it cannot break out of the attribute`` () =
@@ -108,7 +108,7 @@ module RocketTests =
         renderAttr (Rocket.propBin ("data", [| 1uy; 2uy; 3uy |]))
         |> should equal """<my-el data="AQID"></my-el>"""
 
-    // Structural templates: Rocket hard-codes data-for, data-if, data-else-if and data-else
+    // Template directives: Rocket always uses the attribute names data-for, data-if, data-else-if and data-else
 
     [<Fact>]
     let ``Rocket.templateFor leaves Rocket's own item and index names alone unless asked`` () =

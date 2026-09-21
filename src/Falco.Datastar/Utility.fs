@@ -7,8 +7,8 @@ open System.Text.RegularExpressions
 module internal String =
     let newLines = [| "\r\n"; "\n"; "\r" |]
 
-    /// Datastar's own kebab (library/src/utils/text.ts), which Rocket uses to turn a prop name into its attribute name.
-    /// Unlike toKebab it splits acronyms and digit boundaries: "innerHTML" -> "inner-html", "pos3d" -> "pos-3-d".
+    /// A copy of Datastar's own kebab function (library/src/utils/text.ts). Rocket uses it to turn a prop name into an attribute name.
+    /// Unlike toKebab, it also splits acronyms and digits: "innerHTML" becomes "inner-html" and "pos3d" becomes "pos-3-d".
     let datastarKebab (value:string) =
         let replace (pattern:string) (replacement:string) (options:RegexOptions) (input:string) =
             Regex.Replace(input, pattern, replacement, options)
@@ -30,8 +30,8 @@ module internal String =
             )
         |> _.Replace("-", "", 0, 1).ToString()
 
-/// Builds JavaScript literals that are safe to place inside a double-quoted HTML attribute.
-/// Falco.Markup does not escape attribute values, so anything embedded in an expression has to be escaped here.
+/// Builds JavaScript literals that are safe inside a double-quoted HTML attribute.
+/// Falco.Markup does not escape attribute values, so anything put into an expression must be escaped here.
 module internal Js =
     let attrEncode (value:string) =
         value.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;")
@@ -41,10 +41,10 @@ module internal Js =
         |> attrEncode
         |> fun escaped -> "'" + escaped + "'"
 
-    /// camelCase, like the JavaScript objects Rocket props decode into. Shared because building options per call is costly.
+    /// camelCase names, to match the JavaScript objects Rocket props are read into. This is one shared instance, because creating options on every call is slow.
     let webJsonOptions = System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)
 
-    /// Strings become single-quoted literals; everything else is its JSON form (true, 5, 1.5, null)
+    /// Strings become single-quoted literals. Everything else is written as JSON (true, 5, 1.5, null)
     let literal<'T> (value:'T) =
         match box value with
         | :? string as text -> stringLiteral text

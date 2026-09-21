@@ -95,7 +95,7 @@ module DsTests =
         renderNode Ds.rocketCdnScript
         |> should equal """<script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.4/bundles/datastar-rocket.js"></script>"""
 
-    // @setAll / @toggleAll take (value, filter) and (filter) since 1.0.0
+    // @setAll takes (value, filter) and @toggleAll takes (filter), in Datastar 1.0.4 and in RC.7
 
     [<Fact>]
     let ``Ds.setAll passes the value first and the prefix as an include filter`` () =
@@ -172,7 +172,7 @@ module DsTests =
         |> should equal """@get('/x',{&quot;requestCancellation&quot;:&quot;cleanup&quot;})"""
 
     [<Fact>]
-    let ``RequestOptions CustomJson is sent as the payload object, not the removed override string`` () =
+    let ``RequestOptions CustomJson is sent as the payload object`` () =
         Ds.post ("/x", { RequestOptions.Defaults with ContentType = CustomJson {| a = 1 |} })
         |> should equal """@post('/x',{&quot;contentType&quot;:&quot;json&quot;,&quot;payload&quot;:{&quot;a&quot;:1}})"""
 

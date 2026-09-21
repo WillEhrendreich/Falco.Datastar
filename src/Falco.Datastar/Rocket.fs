@@ -6,38 +6,38 @@ open System.Text.Json
 open Falco.Markup
 
 /// <summary>
-/// Server-side helpers for Rocket, Datastar's web-component layer (load it with <see cref="Ds.rocketCdnScript"/>).
-/// Components are defined in JavaScript with <c>rocket(tag, definition)</c>; these helpers render the server's side of the contract:
-/// the props a component reads from its attributes, the local signals and actions its children may use, and its template directives.
-/// Nothing here sets a value the caller did not pass, so Rocket's own defaults apply.
+/// Server-side helpers for Rocket, Datastar's web components. Load Rocket with <see cref="Ds.rocketCdnScript"/>.
+/// Components are written in JavaScript with <c>rocket(tag, definition)</c>. These helpers cover what the server renders:
+/// the props a component reads from its attributes, the signals and actions its children can use, and its template directives.
+/// They only write the values you pass, so Rocket's own defaults still apply.
 /// https://github.com/starfederation/datastar/tree/v1.0.4/library/src/rocket
 /// </summary>
 [<AbstractClass; Sealed; RequireQualifiedAccess>]
 type Rocket =
     /// <summary>
-    /// A signal that is private to one component instance, for use in expressions inside the component, e.g. <c>Ds.text (Rocket.local "count")</c>.
-    /// Rocket rewrites it to a path unique to the instance, so two instances of a component do not share it.
+    /// A signal that belongs to one instance of a component, for use in expressions inside it, e.g. <c>Ds.text (Rocket.local "count")</c>.
+    /// Rocket rewrites the name to a path that is unique to the instance, so two instances of the same component do not share the signal.
     /// </summary>
-    /// <param name="name">The local signal, declared in the component's setup with <c>$$('name', initialValue)</c></param>
+    /// <param name="name">The signal's name. Declare it in the component's setup with <c>$$('name', initialValue)</c></param>
     /// <returns>Expression</returns>
     static member local (name:string) =
         "$$" + name
 
     /// <summary>
-    /// Calls an action of the component the expression is inside, e.g. <c>Ds.onClick (Rocket.call "flip")</c>.
-    /// Rocket looks for a component action with that name and falls back to Datastar's global actions.
+    /// Calls an action of the component that contains the expression, e.g. <c>Ds.onClick (Rocket.call "flip")</c>.
+    /// Rocket looks for a component action with that name first, and then for a Datastar action.
     /// </summary>
-    /// <param name="name">The action, registered in the component's setup with <c>action('name', fn)</c></param>
-    /// <param name="args">Expressions passed to the action</param>
+    /// <param name="name">The action's name. Register it in the component's setup with <c>action('name', fn)</c></param>
+    /// <param name="args">Expressions to pass to the action</param>
     /// <returns>Expression</returns>
     static member call (name:string, ?args:string list) =
         let arguments = defaultArg args [] |> String.concat ", "
         $"@{name}({arguments})"
 
     /// <summary>
-    /// Makes a bind, computed, indicator or ref attribute refer to the page's signal instead of the component's own.
-    /// Inside a component Rocket scopes these attributes to the instance; this opts one out (Rocket's <c>__root</c> modifier).
-    /// It does not apply to <c>data-signals</c>, which Rocket always scopes.
+    /// Makes a bind, computed, indicator or ref attribute use the page's signal instead of the component's own.
+    /// Rocket normally ties these attributes to the component instance. This opts one attribute out, using Rocket's <c>__root</c> modifier.
+    /// It does not work on <c>data-signals</c>, which Rocket always ties to the instance.
     /// </summary>
     /// <param name="attribute">The attribute to opt out, e.g. <c>Ds.bind "query"</c></param>
     /// <returns>Attribute</returns>
@@ -50,16 +50,16 @@ type Rocket =
         Attr.create (String.datastarKebab name) (Js.attrEncode encoded)
 
     /// <summary>
-    /// A string prop. The attribute name is the prop name the way Rocket derives it, e.g. <c>maxCount</c> becomes <c>max-count</c>.
+    /// A string prop. The attribute name is the prop name converted the way Rocket converts it, e.g. <c>maxCount</c> becomes <c>max-count</c>.
     /// </summary>
-    /// <param name="name">The prop name as defined in the component, e.g. "label"</param>
-    /// <param name="value">The value; it is escaped for the attribute</param>
+    /// <param name="name">The prop name as the component defines it, e.g. "label"</param>
+    /// <param name="value">The text. It is escaped for use in an attribute</param>
     /// <returns>Attribute</returns>
     static member propString (name:string, value:string) =
         Rocket.prop (name, value)
 
     /// <summary>
-    /// A number prop. Written with the invariant culture, because the browser parses with a dot whatever the server's culture is.
+    /// A number prop. It is written with the invariant culture, because the browser always reads a dot as the decimal separator, whatever the server's culture is.
     /// </summary>
     /// <param name="name">The prop name as defined in the component</param>
     /// <param name="value">Any numeric type</param>
@@ -68,7 +68,7 @@ type Rocket =
         Rocket.prop (name, (value :> IFormattable).ToString(null, CultureInfo.InvariantCulture))
 
     /// <summary>
-    /// A boolean prop. Always written, as "true" or "false": leaving the attribute out means the prop's default, which may be true.
+    /// A boolean prop. It is always written, as "true" or "false". If the attribute were left out, the component would use the prop's default, which might be true.
     /// </summary>
     /// <param name="name">The prop name as defined in the component</param>
     /// <param name="value">The value</param>
@@ -77,27 +77,27 @@ type Rocket =
         Rocket.prop (name, Bool.eitherOr "true" "false" value)
 
     /// <summary>
-    /// A date prop, written as UTC ISO 8601 with milliseconds, the same as JavaScript's <c>Date.toISOString()</c>.
+    /// A date prop, written as UTC ISO 8601 with milliseconds, the same format as JavaScript's <c>Date.toISOString()</c>.
     /// </summary>
     /// <param name="name">The prop name as defined in the component</param>
-    /// <param name="value">The moment; it is converted to UTC</param>
+    /// <param name="value">The moment in time. It is converted to UTC</param>
     /// <returns>Attribute</returns>
     static member propDate (name:string, value:DateTimeOffset) =
         Rocket.prop (name, value.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture))
 
     /// <summary>
-    /// A structured prop, written as JSON: for Rocket's json, array, tuple, object and oneOf codecs.
-    /// Property names are camelCase, like the JavaScript objects the component decodes them into, unless you pass options.
+    /// A structured prop, written as JSON. It works for Rocket's json, array, tuple, object and oneOf codecs.
+    /// Property names are camelCase, like the JavaScript objects the component reads them into, unless you pass your own options.
     /// </summary>
     /// <param name="name">The prop name as defined in the component</param>
-    /// <param name="value">Serialized with System.Text.Json; it is escaped for the attribute</param>
-    /// <param name="options">Optional options for the JSON serializer</param>
+    /// <param name="value">The value to serialize with System.Text.Json. The result is escaped for use in an attribute</param>
+    /// <param name="options">Options for the JSON serializer</param>
     /// <returns>Attribute</returns>
     static member propJson<'T> (name:string, value:'T, ?options:JsonSerializerOptions) =
         Rocket.prop (name, JsonSerializer.Serialize<'T>(value, defaultArg options Js.webJsonOptions))
 
     /// <summary>
-    /// A binary prop, written as base64, which the component's bin codec decodes with <c>atob</c>.
+    /// A binary prop, written as base64. The component's bin codec decodes it with <c>atob</c>.
     /// </summary>
     /// <param name="name">The prop name as defined in the component</param>
     /// <param name="value">The bytes</param>
@@ -106,14 +106,14 @@ type Rocket =
         Rocket.prop (name, Convert.ToBase64String value)
 
     /// <summary>
-    /// Repeats the children for each item of a signal or expression, e.g. <c>Rocket.templateFor (Rocket.local "todos", [ ... ], item = "todo")</c>.
-    /// Rocket names the item <c>item</c> and the index <c>i</c> unless told otherwise; those are left alone unless you pass them.
-    /// The attribute is always <c>data-for</c>: Rocket does not honour a custom attribute prefix for its template directives.
+    /// Repeats the children once for each item in a signal or expression, e.g. <c>Rocket.templateFor (Rocket.local "todos", [ ... ], item = "todo")</c>.
+    /// Rocket calls the item <c>item</c> and the index <c>i</c> unless you give other names, and this method only writes names you pass.
+    /// The attribute is always <c>data-for</c>, even if you set a different attribute prefix, because Rocket does not support a prefix on its template directives.
     /// </summary>
-    /// <param name="source">An expression that evaluates to an array, iterable or string</param>
-    /// <param name="children">The row, which can use the item and the index by name</param>
-    /// <param name="item">Names the item; when only <paramref name="index"/> is given the item is called <c>item</c></param>
-    /// <param name="index">Names the index</param>
+    /// <param name="source">An expression that gives an array, an iterable or a string</param>
+    /// <param name="children">The content of one row. It can use the item and the index by their names</param>
+    /// <param name="item">The item's name. If you pass only <paramref name="index"/>, the item is called <c>item</c></param>
+    /// <param name="index">The index's name</param>
     /// <returns>Element</returns>
     static member templateFor (source:string, children:XmlNode list, ?item:string, ?index:string) =
         let expression =
@@ -125,28 +125,28 @@ type Rocket =
         Elem.template [ Attr.create "data-for" (Js.attrEncode expression) ] children
 
     /// <summary>
-    /// Renders the children only while the condition is true. Follow it with <see cref="templateElseIf"/> and <see cref="templateElse"/> siblings for a chain.
-    /// The attribute is always <c>data-if</c>: Rocket does not honour a custom attribute prefix for its template directives.
+    /// Renders the children only while the condition is true. To make a chain, put <see cref="templateElseIf"/> and <see cref="templateElse"/> elements directly after it.
+    /// The attribute is always <c>data-if</c>, even if you set a different attribute prefix, because Rocket does not support a prefix on its template directives.
     /// </summary>
     /// <param name="condition">An expression</param>
-    /// <param name="children">What to render</param>
+    /// <param name="children">The content to render</param>
     /// <returns>Element</returns>
     static member templateIf (condition:string, children:XmlNode list) =
         Elem.template [ Attr.create "data-if" (Js.attrEncode condition) ] children
 
     /// <summary>
-    /// The next branch of a chain that starts with <see cref="templateIf"/>; it must directly follow a templateIf or another templateElseIf.
+    /// The next branch of a chain that starts with <see cref="templateIf"/>. It must come directly after a templateIf or another templateElseIf.
     /// </summary>
     /// <param name="condition">An expression</param>
-    /// <param name="children">What to render</param>
+    /// <param name="children">The content to render</param>
     /// <returns>Element</returns>
     static member templateElseIf (condition:string, children:XmlNode list) =
         Elem.template [ Attr.create "data-else-if" (Js.attrEncode condition) ] children
 
     /// <summary>
-    /// The last branch of a chain; it must directly follow a templateIf or a templateElseIf.
+    /// The last branch of a chain. It must come directly after a templateIf or a templateElseIf.
     /// </summary>
-    /// <param name="children">What to render</param>
+    /// <param name="children">The content to render</param>
     /// <returns>Element</returns>
     static member templateElse (children:XmlNode list) =
         Elem.template [ Attr.createBool "data-else" ] children

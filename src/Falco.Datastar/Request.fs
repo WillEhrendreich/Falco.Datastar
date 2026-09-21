@@ -35,6 +35,7 @@ let private maxManifestBytes = 1024 * 1024
 /// <summary>
 /// Read the manifest that Rocket's publishRocketManifests posts to your server. It returns a RocketManifestError when the body is not a manifest this library can read,
 /// or when it is larger than 1 MiB, in which case the rest of the body is not read.
+/// A connection that fails, or a request that is cancelled, is not an answer to give, so it throws an IOException or an OperationCanceledException.
 /// Can only call this once per request
 /// </summary>
 /// <param name="ctx">HttpContext</param>

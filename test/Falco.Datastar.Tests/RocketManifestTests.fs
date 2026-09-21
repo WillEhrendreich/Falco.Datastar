@@ -234,6 +234,10 @@ module RocketManifestTests =
         // Half of a surrogate pair is JSON, but .NET cannot turn it into text
         (match errorOf (RocketManifest.parse """{"version":1,"generatedAt":"\ud800","components":[]}""") with | RocketManifestError.NotJson _ -> true | _ -> false)
         |> should equal true
+        // The text itself has half of a surrogate pair, so it cannot be turned into UTF-8. It is built here, because the F# compiler changes such a character in a string literal.
+        let broken = "{\"version\":1,\"generatedAt\":\"" + string '\ud800' + "\",\"components\":[]}"
+        (match errorOf (RocketManifest.parse broken) with | RocketManifestError.NotJson _ -> true | _ -> false)
+        |> should equal true
 
     /// A stream that has as many bytes as you ask for, and counts how many were read
     type private EndlessStream(length:int64) =

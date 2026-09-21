@@ -1,5 +1,6 @@
 namespace Falco.Datastar.Tests
 
+open System
 open System.Globalization
 open Falco.Markup
 
@@ -21,3 +22,29 @@ module TestHelpers =
             run ()
         finally
             CultureInfo.CurrentCulture <- original
+
+    /// What a JavaScript parser does with a single-quoted string literal such as 'it\'s': the text that it stands for.
+    /// It fails when the literal is not valid, which is when an unescaped quote ends it early or a raw line break is in it.
+    let readJsLiteral (literal:string) =
+        let body = literal.Substring(1, literal.Length - 2)
+        let text = System.Text.StringBuilder()
+        let mutable index = 0
+        while index < body.Length do
+            match body.[index] with
+            | '\\' when body.[index + 1] = 'u' ->
+                text.Append(char (Convert.ToInt32(body.Substring(index + 2, 4), 16))) |> ignore
+                index <- index + 6
+            | '\\' ->
+                text.Append(match body.[index + 1] with | 'n' -> '\n' | 'r' -> '\r' | other -> other) |> ignore
+                index <- index + 2
+            | '\'' -> failwith $"an unescaped quote ends the string early in {literal}"
+            | '\n' | '\r' -> failwith $"a raw line break is not allowed in a string literal in {literal}"
+            | other ->
+                text.Append other |> ignore
+                index <- index + 1
+        text.ToString()
+
+    /// What a browser does with the text of an attribute, and then what a JavaScript parser does with the string literal in it
+    let readBack (attributeValue:string) =
+        readJsLiteral (System.Web.HttpUtility.HtmlDecode attributeValue)
+

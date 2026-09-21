@@ -156,22 +156,22 @@ module RequestOptionsTests =
 
     [<Fact>]
     let ``Any set of options that has no raw JavaScript in it writes an object that is valid JSON`` () =
-        let random = Random 7
-        let pick (choices: 'a list) = choices.[random.Next choices.Length]
-        for _ in 1 .. 300 do
-            let options =
-                { ContentType = pick [ Json; Form; SelectedForm "#a b"; CustomJson {| x = "it's <b>\"q\"</b> &" |} ]
-                  FilterSignals = pick [ SignalsFilter.None; SignalsFilter.Include "a/b"; SignalsFilter.Exclude "x\"y"; SignalsFilter.Prefix "form." ]
-                  Headers = pick [ []; [ "X-A", "it's \"q\"" ]; [ "X-A", "1"; "X-B", "<&>" ] ]
-                  OpenWhenHidden = pick [ ValueNone; ValueSome true; ValueSome false ]
-                  Retry = pick [ OnAuto; OnError; OnAlways; OnNever ]
-                  RetryInterval = pick [ TimeSpan.FromSeconds 1.0; TimeSpan.FromMilliseconds 250.5 ]
-                  RetryScaler = pick [ 2.0; 1.5; 3.0 ]
-                  RetryMaxWait = pick [ TimeSpan.FromSeconds 30.0; TimeSpan.FromSeconds 5.0 ]
-                  RetryMaxCount = pick [ 10; 3 ]
-                  RequestCancellation = pick [ Auto; Disabled; Cleanup ] }
-            let action = Ds.get ("/x", options)
-            // @get('/x',{...}) with the attribute's HTML escaping undone, as the browser sees it
-            let decoded = HttpUtility.HtmlDecode(action.Substring(action.IndexOf("',", StringComparison.Ordinal) + 2).TrimEnd ')')
-            use parsed = JsonDocument.Parse decoded
-            parsed.RootElement.ValueKind |> should equal JsonValueKind.Object
+        Dst.run "Any set of options" (fun random ->
+            let pick (choices: 'a list) = Dst.pick random (Array.ofList choices)
+            for _ in 1 .. 20 do
+                let options =
+                    { ContentType = pick [ Json; Form; SelectedForm "#a b"; CustomJson {| x = "it's <b>\"q\"</b> &" |} ]
+                      FilterSignals = pick [ SignalsFilter.None; SignalsFilter.Include "a/b"; SignalsFilter.Exclude "x\"y"; SignalsFilter.Prefix "form." ]
+                      Headers = pick [ []; [ "X-A", "it's \"q\"" ]; [ "X-A", "1"; "X-B", "<&>" ] ]
+                      OpenWhenHidden = pick [ ValueNone; ValueSome true; ValueSome false ]
+                      Retry = pick [ OnAuto; OnError; OnAlways; OnNever ]
+                      RetryInterval = pick [ TimeSpan.FromSeconds 1.0; TimeSpan.FromMilliseconds 250.5 ]
+                      RetryScaler = pick [ 2.0; 1.5; 3.0 ]
+                      RetryMaxWait = pick [ TimeSpan.FromSeconds 30.0; TimeSpan.FromSeconds 5.0 ]
+                      RetryMaxCount = pick [ 10; 3 ]
+                      RequestCancellation = pick [ Auto; Disabled; Cleanup ] }
+                let action = Ds.get ("/x", options)
+                // @get('/x',{...}) with the attribute's HTML escaping undone, as the browser sees it
+                let decoded = HttpUtility.HtmlDecode(action.Substring(action.IndexOf("',", StringComparison.Ordinal) + 2).TrimEnd ')')
+                use parsed = JsonDocument.Parse decoded
+                parsed.RootElement.ValueKind |> should equal JsonValueKind.Object)

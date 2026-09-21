@@ -74,54 +74,36 @@ module EscapingTests =
             value.Replace("\\", "\\\\").Replace("'", "\\'").Replace("\n", "\\n").Replace("\r", "\\r")
                  .Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;")
         let alphabet = [| 'a'; 'Z'; '0'; ' '; '/'; '?'; '='; '\\'; '\''; '\n'; '\r'; '&'; '<'; '>'; '"'; '$'; '@'; '(' ; ')'; ';'; '\u2028'; 'é' |]
-        let random = Random 42
-        for _ in 1 .. 3000 do
-            let text = String(Array.init (random.Next(0, 24)) (fun _ -> alphabet.[random.Next alphabet.Length]))
-            Expr.toString (Expr.string text) |> should equal ("'" + reference text + "'")
-            Ds.get text |> should equal ("@get('" + reference text + "')")
-
-    /// What a browser does with the text of an attribute, and then what a JavaScript parser does with a single-quoted string literal in it
-    let private readBack (attributeValue:string) =
-        let literal = Web.HttpUtility.HtmlDecode attributeValue
-        let body = literal.Substring(1, literal.Length - 2)
-        let text = Text.StringBuilder()
-        let mutable index = 0
-        while index < body.Length do
-            match body.[index] with
-            | '\\' ->
-                text.Append(match body.[index + 1] with | 'n' -> '\n' | 'r' -> '\r' | other -> other) |> ignore
-                index <- index + 2
-            | '\'' -> failwith $"an unescaped quote ends the string early in {literal}"
-            | '\n' | '\r' -> failwith $"a raw line break is not allowed in a string literal in {literal}"
-            | other ->
-                text.Append other |> ignore
-                index <- index + 1
-        text.ToString()
+        Dst.run "Escaping gives the same result" (fun random ->
+            for _ in 1 .. 120 do
+                let text = String(Array.init (random.Next(0, 24)) (fun _ -> alphabet.[random.Next alphabet.Length]))
+                Expr.toString (Expr.string text) |> should equal ("'" + reference text + "'")
+                Ds.get text |> should equal ("@get('" + reference text + "')"))
 
     [<Fact>]
     let ``Text that goes through the escaping is read back as the same text by a browser and a JavaScript parser`` () =
         let alphabet = [| 'a'; 'Z'; '0'; ' '; '\t'; '/'; '='; '\\'; '\''; '\n'; '\r'; '&'; '<'; '>'; '"'; '$'; '@'; ';'; '\u2028'; 'é'; '#'; '%'; '`' |]
-        let random = Random 11
-        for _ in 1 .. 5000 do
-            let text = String(Array.init (random.Next(0, 30)) (fun _ -> alphabet.[random.Next alphabet.Length]))
-            let rendered = renderAttr (Ds.text (Expr.string text))
-            // <div data-text="VALUE"></div>
-            let value = rendered.Substring("<div data-text=\"".Length, rendered.Length - "<div data-text=\"".Length - "\"></div>".Length)
-            value |> should not' (contain '"')
-            value |> should not' (contain '<')
-            value |> should not' (contain '>')
-            readBack value |> should equal text
+        Dst.run "Text that goes through the escaping" (fun random ->
+            for _ in 1 .. 200 do
+                let text = String(Array.init (random.Next(0, 30)) (fun _ -> alphabet.[random.Next alphabet.Length]))
+                let rendered = renderAttr (Ds.text (Expr.string text))
+                // <div data-text="VALUE"></div>
+                let value = rendered.Substring("<div data-text=\"".Length, rendered.Length - "<div data-text=\"".Length - "\"></div>".Length)
+                value |> should not' (contain '"')
+                value |> should not' (contain '<')
+                value |> should not' (contain '>')
+                readBack value |> should equal text)
 
     [<Fact>]
     let ``A URL goes through the same escaping, so a browser reads it back as written`` () =
-        let random = Random 12
         let alphabet = [| 'a'; '/'; '?'; '='; '&'; '\''; '"'; '<'; ')'; '\\'; ' ' |]
-        for _ in 1 .. 2000 do
-            let url = String(Array.init (random.Next(1, 20)) (fun _ -> alphabet.[random.Next alphabet.Length]))
-            let action = Ds.get url
-            // @get('URL')
-            let literal = action.Substring("@get(".Length, action.Length - "@get(".Length - ")".Length)
-            readBack literal |> should equal url
+        Dst.run "A URL goes through the same escaping" (fun random ->
+            for _ in 1 .. 80 do
+                let url = String(Array.init (random.Next(1, 20)) (fun _ -> alphabet.[random.Next alphabet.Length]))
+                let action = Ds.get url
+                // @get('URL')
+                let literal = action.Substring("@get(".Length, action.Length - "@get(".Length - ")".Length)
+                readBack literal |> should equal url)
 
     // Signals filters are regular expressions inside a JavaScript object literal, inside an attribute
 
@@ -229,4 +211,20 @@ module EscapingTests =
         refusedIndex.Message |> should startWith "Rocket.forEach needs an index name that is a JavaScript identifier, such as \"n\", but it is 'a b'."
         Rocket.forEach (Expr.read (Signal.rocket<string list> "items"), (fun _ _ -> []), itemName = "$row", indexName = "_n")
         |> renderNode |> should equal """<template data-for="$row, _n in $$items"></template>"""
+
+    // Found by the simulation in DstHtmlTests. An HTML parser changes a carriage return in an attribute value into a line feed,
+    // and a NUL character into U+FFFD, so a value that had one arrived in the browser as different text.
+
+    [<Fact>]
+    let ``A carriage return in an attribute value is written as a character reference, which a parser keeps`` () =
+        renderAttr (Rocket.propString ("label", "a\rb\r\nc")) |> should equal """<div label="a&#13;b&#13;
+c"></div>"""
+        renderAttr (Ds.nonce "a\rb") |> should equal """<div data-nonce="a&#13;b"></div>"""
+
+    [<Fact>]
+    let ``A NUL character is written as U+FFFD in an attribute value, and as an escape in a string literal`` () =
+        renderAttr (Rocket.propString ("label", "a\000b")) |> should equal "<div label=\"a\uFFFDb\"></div>"
+        Expr.toString (Expr.string "a\000b") |> should equal @"'a\u0000b'"
+        readJsLiteral (Expr.toString (Expr.string "a\000b")) |> should equal "a\000b"
+        SignalsFilter.Serialize (SignalsFilter.Include "a\000b") |> should equal @"{ include: /a\u0000b/ }"
 

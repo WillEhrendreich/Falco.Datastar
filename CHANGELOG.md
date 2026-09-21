@@ -83,6 +83,9 @@ A filter that has an exclude but no include keeps Datastar's rule that signals w
 **Signals filters.** `SignalsFilter.Serialize` now returns text that is ready for an attribute, so if you put its result in an attribute yourself, do not encode it again. `SignalsFilter.Include`, `Exclude` and `Prefix` patterns are regular expressions without the slashes around them. The library escapes a slash and a line break inside the pattern, and encodes the pattern for the attribute.
 `Ds.onSignalPatchFilter` and `Ds.jsonSignalsOptions` used to write the pattern as it was, so a quote in it ended the attribute. A pattern that you wrote with slashes around it, such as `"/foo/"`, is now a pattern for the text `/foo/`. Remove the slashes.
 
+**Carriage returns and NUL characters in attribute values.** An HTML parser changes a carriage return in an attribute value into a line feed, and a NUL character into U+FFFD, so `Rocket.propString ("label", "a\rb")` arrived in the browser as different text.
+A carriage return is now written as `&#13;`, which a parser keeps. HTML cannot keep a NUL in an attribute, so it is written as U+FFFD, which is what a browser would read. In a JavaScript string literal, a NUL is written as `\u0000`.
+
 **`Ds.safariStreamingFix`** wrote `data-on:pageshow.window`. Datastar 1.0.4 reads modifiers after `__`, so that attribute listened for an event called `pageshow.window` and never ran. It now writes `data-on:pageshow__window`.
 
 **Expressions built with `Expr.unsafeRaw` and `Stmt.unsafeRaw`** are escaped for the attribute, and `Expr.unsafeRaw` puts text that is more than a name in parentheses. `Expr.divide` on whole numbers cuts the result to a whole number.

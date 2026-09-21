@@ -127,24 +127,23 @@ module ExprTests =
 
     [<Fact>]
     let ``Every name that is accepted is read by Datastar as the name that an expression uses`` () =
-        let random = Random 42
-        let alphabet = "abcXYZ019_.-$ "
-        let scopes = [ SignalScope.Browser; SignalScope.Server; SignalScope.RocketComponent ]
-        let mutable accepted = 0
-        for _ in 1 .. 30000 do
-            let name = String(Array.init (random.Next(1, 9)) (fun _ -> alphabet.[random.Next alphabet.Length]))
-            let scope = scopes.[random.Next scopes.Length]
-            match Signal.tryCreate<int> scope name with
-            | Error _ -> ()
-            | Ok signal ->
-                accepted <- accepted + 1
-                // A modifier that the library adds is still a modifier, and does not change the name
-                let rendered = renderAttr (Ds.signal (signal, 1, ifMissing = true))
-                let attribute = rendered.Substring("<div ".Length, rendered.IndexOf '=' - "<div ".Length)
-                datastarSignalName attribute |> should equal (Signal.path signal)
-                attribute |> should endWith "__ifmissing"
-        // The alphabet is mostly bad characters, so a run that accepted nothing would prove nothing
-        accepted |> should be (greaterThan 500)
+        Dst.run "Every name that is accepted" (fun random ->
+            let alphabet = "abcXYZ019_.-$ "
+            let scopes = [| SignalScope.Browser; SignalScope.Server; SignalScope.RocketComponent |]
+            let mutable accepted = 0
+            for _ in 1 .. 1200 do
+                let name = String(Array.init (random.Next(1, 9)) (fun _ -> alphabet.[random.Next alphabet.Length]))
+                match Signal.tryCreate<int> (Dst.pick random scopes) name with
+                | Error _ -> ()
+                | Ok signal ->
+                    accepted <- accepted + 1
+                    // A modifier that the library adds is still a modifier, and does not change the name
+                    let rendered = renderAttr (Ds.signal (signal, 1, ifMissing = true))
+                    let attribute = rendered.Substring("<div ".Length, rendered.IndexOf '=' - "<div ".Length)
+                    datastarSignalName attribute |> should equal (Signal.path signal)
+                    attribute |> should endWith "__ifmissing"
+            // The alphabet is mostly bad characters, so a run that accepted nothing would prove nothing
+            accepted |> should be (greaterThan 20))
 
     // Expressions
 

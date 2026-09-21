@@ -301,3 +301,5 @@ module RocketManifest =
             | :? JsonException as error -> Error (RocketManifestError.NotJson error.Message)
             // A string with half of a surrogate pair is JSON that .NET cannot turn into text
             | :? InvalidOperationException as error -> Error (RocketManifestError.NotJson error.Message)
+            // The text that is passed in can have half of a surrogate pair too, and then it cannot be turned into UTF-8
+            | :? ArgumentException as error -> Error (RocketManifestError.NotJson error.Message)

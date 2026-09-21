@@ -48,8 +48,9 @@ module internal String =
 module internal Js =
     /// The characters that need escaping in an attribute, and in a single-quoted JavaScript string inside one.
     /// Most text has none of them, and then it is returned as it is, without a copy.
-    let attributeSpecials = SearchValues.Create "&<>\""
-    let stringSpecials = SearchValues.Create "\\'\n\r&<>\""
+    /// An HTML parser changes a carriage return in an attribute value into a line feed, and a NUL character into U+FFFD, so those two are written as escapes too.
+    let attributeSpecials = SearchValues.Create "&<>\"\r\000"
+    let stringSpecials = SearchValues.Create "\\'\n\r\000&<>\""
 
     let attrEncode (value:string) =
         match value.AsSpan().IndexOfAny attributeSpecials with
@@ -62,6 +63,9 @@ module internal Js =
                 | '<' -> builder.Append "&lt;" |> ignore
                 | '>' -> builder.Append "&gt;" |> ignore
                 | '"' -> builder.Append "&quot;" |> ignore
+                // A carriage return written as a character reference is kept. A NUL cannot be kept in an attribute, so it is written as the character that HTML would give it.
+                | '\r' -> builder.Append "&#13;" |> ignore
+                | '\000' -> builder.Append '\uFFFD' |> ignore
                 | other -> builder.Append other |> ignore
             builder.ToString()
 
@@ -76,6 +80,7 @@ module internal Js =
                 | '\'' -> builder.Append "\\'" |> ignore
                 | '\n' -> builder.Append "\\n" |> ignore
                 | '\r' -> builder.Append "\\r" |> ignore
+                | '\000' -> builder.Append "\\u0000" |> ignore
                 | '&' -> builder.Append "&amp;" |> ignore
                 | '<' -> builder.Append "&lt;" |> ignore
                 | '>' -> builder.Append "&gt;" |> ignore
@@ -98,6 +103,7 @@ module internal Js =
             | false, '/' -> builder.Append "\\/" |> ignore
             | false, '\n' -> builder.Append "\\n" |> ignore
             | false, '\r' -> builder.Append "\\r" |> ignore
+            | false, '\000' -> builder.Append "\\u0000" |> ignore
             | false, '\u2028' -> builder.Append "\\u2028" |> ignore
             | false, '\u2029' -> builder.Append "\\u2029" |> ignore
             | false, other -> builder.Append other |> ignore

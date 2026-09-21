@@ -9,8 +9,16 @@ open StarFederation.Datastar.FSharp
 
 [<AbstractClass; Sealed; RequireQualifiedAccess>]
 type Ds =
+    /// <summary>
+    /// The Datastar release that <see cref="cdnSrc"/> and <see cref="rocketCdnSrc"/> point at
+    /// </summary>
+    static member datastarVersion = "v1.0.4"
+
+    /// <summary>
+    /// The standard Datastar bundle on the jsDelivr CDN, at <see cref="datastarVersion"/>
+    /// </summary>
     static member cdnSrc =
-        @"https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0-RC.7/bundles/datastar.js"
+        $"https://cdn.jsdelivr.net/gh/starfederation/datastar@{Ds.datastarVersion}/bundles/datastar.js"
 
     /// <summary>
     /// Shorthand for `Elem.script [ Attr.type' "module"; Attr.src cdnSrc ] []`
@@ -18,6 +26,19 @@ type Ds =
     /// <returns>Attribute</returns>
     static member cdnScript =
         Elem.script [ Attr.type' "module"; Attr.src Ds.cdnSrc ] []
+
+    /// <summary>
+    /// The Datastar bundle that includes Rocket, Datastar's web-component layer, on the jsDelivr CDN, at <see cref="datastarVersion"/>.
+    /// It is a superset of <see cref="cdnSrc"/>; load one or the other, not both.
+    /// </summary>
+    static member rocketCdnSrc =
+        $"https://cdn.jsdelivr.net/gh/starfederation/datastar@{Ds.datastarVersion}/bundles/datastar-rocket.js"
+
+    /// <summary>
+    /// Shorthand for `Elem.script [ Attr.type' "module"; Attr.src rocketCdnSrc ] []`
+    /// </summary>
+    static member rocketCdnScript =
+        Elem.script [ Attr.type' "module"; Attr.src Ds.rocketCdnSrc ] []
 
     /// <summary>
     /// Patches a signal into the existing signals with the given value.
@@ -72,6 +93,36 @@ type Ds =
     /// <returns>Attribute</returns>
     static member inline bind signalPath =
         DsAttr.createSp ("bind", signalPath)
+
+    /// <summary>
+    /// Binds a signal to a property of a custom element or web component, instead of its default value or attribute.
+    /// The property name is kebab-cased because the HTML parser lowercases attribute names; Datastar camel-cases it again.
+    /// https://data-star.dev/reference/attributes#data-bind
+    /// </summary>
+    /// <param name="signalPath">The signal to bind to</param>
+    /// <param name="propName">The element property to bind, e.g. "checked" or "someProp"</param>
+    /// <param name="events">The events that sync the property into the signal; when omitted, Datastar uses the element's default events</param>
+    /// <returns>Attribute</returns>
+    static member bindProp (signalPath:SignalPath, propName:string, ?events:string list) =
+        DsAttr.start "bind"
+        |> DsAttr.addTarget (signalPath |> SignalPath.kebabValue)
+        |> DsAttr.addModifierOption (events |> Option.filter (List.isEmpty >> not) |> Option.map (fun names -> { Name = "event"; Tags = names }) |> Option.toValueOption)
+        |> DsAttr.addModifier { Name = "prop"; Tags = [ String.toKebab propName ] }
+        |> DsAttr.create
+
+    /// <summary>
+    /// Binds a signal to an element, syncing it into the signal on the given events instead of the element's default events.
+    /// Event names are lowercased by the HTML parser, so custom events must be lowercase to be listed here.
+    /// https://data-star.dev/reference/attributes#data-bind
+    /// </summary>
+    /// <param name="signalPath">The signal to bind to</param>
+    /// <param name="events">The events that sync the element into the signal, e.g. [ "input"; "change" ]</param>
+    /// <returns>Attribute</returns>
+    static member bindEvent (signalPath:SignalPath, events:string list) =
+        DsAttr.start "bind"
+        |> DsAttr.addTarget (signalPath |> SignalPath.kebabValue)
+        |> DsAttr.addModifier { Name = "event"; Tags = events }
+        |> DsAttr.create
 
     /// <summary>
     /// Adds or removes a class from the element based on an expression.
@@ -354,6 +405,8 @@ type Ds =
         | Patch url, ValueSome options -> $"@patch('{url}',{options |> RequestOptions.Serialize})"
         | Delete url, ValueNone -> $@"@delete('{url}')"
         | Delete url, ValueSome options -> $"@delete('{url}',{options |> RequestOptions.Serialize})"
+        | Query url, ValueNone -> $@"@query('{url}')"
+        | Query url, ValueSome options -> $"@query('{url}',{options |> RequestOptions.Serialize})"
 
     /// <summary>
     /// Creates a @get action for an expression with options. The action sends a GET request with the given url.
@@ -406,17 +459,36 @@ type Ds =
         Ds.backendAction (options |> Option.toValueOption) (Delete url)
 
     /// <summary>
-    /// @setall(), set all the signals that start with the prefix to the expression provided.
+    /// Creates a @query action for an expression with options. The action sends a QUERY request with the given url.
+    /// Signals are sent with the body of the request.
+    /// https://data-star.dev/reference/actions#query
+    /// https://data-star.dev/reference/actions#options
+    /// </summary>
+    /// <returns>Expression</returns>
+    static member query (url, ?options) =
+        Ds.backendAction (options |> Option.toValueOption) (Query url)
+
+    /// <summary>
+    /// @setAll(), set all the signals matching the filter to the value provided; every signal if there is no filter.
+    /// https://data-star.dev/reference/actions#setall
+    /// </summary>
+    /// <param name="value">Value to set; strings are quoted, numbers and booleans are not</param>
+    /// <param name="signalsFilter">Regex of signal paths to be included and excluded</param>
+    /// <returns>Expression</returns>
+    static member setAllFiltered<'T> (value:'T, signalsFilter:SignalsFilter) =
+        match signalsFilter = SignalsFilter.None with
+        | true -> $"@setAll({Js.literal value})"
+        | false -> $"@setAll({Js.literal value}, {signalsFilter |> SignalsFilter.Serialize |> Js.attrEncode})"
+
+    /// <summary>
+    /// @setAll(), set all the signals that start with the prefix to the value provided.
     /// https://data-star.dev/reference/actions#setall
     /// </summary>
     /// <param name="signalsPathPrefix">All signals to set that have this prefix, e.g. 'foo.'</param>
-    /// <param name="value">Value to set</param>
+    /// <param name="value">Value to set; strings are quoted, numbers and booleans are not</param>
     /// <returns>Expression</returns>
-    static member inline setAll<'T> (signalsPathPrefix:string, value:'T) =
-        match box value with
-        | :? Boolean as value' -> $"@setAll('{signalsPathPrefix}', {value'.ToString().ToLower()})"
-        | :? string as value' -> $"@setAll('{signalsPathPrefix}', '{value'}')"
-        | value' -> $"@setAll('{signalsPathPrefix}', '{value'}')"
+    static member setAll<'T> (signalsPathPrefix:string, value:'T) =
+        Ds.setAllFiltered (value, SignalsFilter.Prefix signalsPathPrefix)
 
     /// <summary>
     /// @toggleAll(), toggle all the signals that start with the prefix.
@@ -425,7 +497,28 @@ type Ds =
     /// <param name="signalsPathPrefix">All signals to toggle that have this prefix, e.g. 'foo.'</param>
     /// <returns>Expression</returns>
     static member toggleAll (signalsPathPrefix:string) =
-        $"@toggleAll('{signalsPathPrefix}')"
+        Ds.toggleAllFiltered (SignalsFilter.Prefix signalsPathPrefix)
+
+    /// <summary>
+    /// @toggleAll(), toggle all the signals matching the filter; every signal if there is no filter.
+    /// https://data-star.dev/reference/actions#toggleall
+    /// </summary>
+    /// <param name="signalsFilter">Regex of signal paths to be included and excluded</param>
+    /// <returns>Expression</returns>
+    static member toggleAllFiltered (signalsFilter:SignalsFilter) =
+        match signalsFilter = SignalsFilter.None with
+        | true -> "@toggleAll()"
+        | false -> $"@toggleAll({signalsFilter |> SignalsFilter.Serialize |> Js.attrEncode})"
+
+    /// <summary>
+    /// @peek(), evaluate the expression without subscribing to the signals it reads.
+    /// Useful in Ds.effect and Ds.computed when a signal should be read but not tracked.
+    /// https://data-star.dev/reference/actions#peek
+    /// </summary>
+    /// <param name="expression">Expression to evaluate, https://data-star.dev/guide/datastar_expressions</param>
+    /// <returns>Expression</returns>
+    static member peek (expression:string) =
+        $"@peek(() => {expression})"
 
     /// <summary>
     /// Method for joining strings with " ; " to simplify multi-line expressions

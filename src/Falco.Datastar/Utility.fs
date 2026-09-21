@@ -16,6 +16,23 @@ module internal String =
             )
         |> _.Replace("-", "", 0, 1).ToString()
 
+/// Builds JavaScript literals that are safe to place inside a double-quoted HTML attribute.
+/// Falco.Markup does not escape attribute values, so anything embedded in an expression has to be escaped here.
+module internal Js =
+    let attrEncode (value:string) =
+        value.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;")
+
+    let stringLiteral (value:string) =
+        value.Replace("\\", "\\\\").Replace("'", "\\'").Replace("\n", "\\n").Replace("\r", "\\r")
+        |> attrEncode
+        |> fun escaped -> "'" + escaped + "'"
+
+    /// Strings become single-quoted literals; everything else is its JSON form (true, 5, 1.5, null)
+    let literal<'T> (value:'T) =
+        match box value with
+        | :? string as text -> stringLiteral text
+        | _ -> System.Text.Json.JsonSerializer.Serialize<'T>(value) |> attrEncode
+
 module internal Bool =
     let inline eitherOr trueThing falseThing bool =
         match bool with

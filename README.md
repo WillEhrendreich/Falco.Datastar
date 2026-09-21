@@ -63,6 +63,10 @@ wapp.UseRouting()
     .Run()
 ```
 
+`Ds.cdnScript` loads the standard Datastar bundle from the jsDelivr CDN, pinned to the release in `Ds.datastarVersion` (currently Datastar 1.0.4).
+If you use [Rocket](https://github.com/starfederation/datastar/tree/v1.0.4/library/src/rocket), Datastar's web-component layer, use `Ds.rocketCdnScript` instead; it loads the same release with Rocket included.
+Load one or the other, not both.
+
 Now, let's incorporate Datastar into our Falco application. First, we'll define a simple route that returns a button that, when clicked, will
 merge an HTML fragment from a GET request.
 
@@ -236,6 +240,21 @@ the signal value is automatically converted to match the original (see the [docu
 Elem.input [ Attr.type' "text"; Ds.bind "firstName" ]
 ```
 
+For custom elements and web components, `Ds.bindProp` binds the signal to a named element property, and can name the events that sync the property back into the signal.
+`Ds.bindEvent` only overrides the events. Property names are kebab-cased in the output, because the HTML parser lowercases attribute names and Datastar camel-cases them again.
+
+```fsharp
+Elem.create "my-slider" [ Ds.bindProp (sp"volume", "value", [ "change" ]) ] []
+Elem.create "my-toggle" [ Ds.bindProp (sp"isOn", "isOn") ] []
+Elem.create "my-input" [ Ds.bindEvent (sp"query", [ "input"; "change" ]) ] []
+```
+
+```html
+<my-slider data-bind:volume__prop.value__event.change></my-slider>
+<my-toggle data-bind:is-on__prop.is-on></my-toggle>
+<my-input data-bind:query__event.input.change></my-input>
+```
+
 ### [Ds.text : `data-text`](https://data-star.dev/reference/attributes#data-text)
 
 Binds the `text` value of an element to a [Datastar expression](https://data-star.dev/guide/datastar_expressions). The value in `$foo` will be automatically set to the `divs` innerText.
@@ -323,7 +342,8 @@ Modifiers allow you to alter the behavior when events are triggered. (Modifiers 
     | Debounce of Debounce  // timespan, leading, and notrailing
     | Throttle of Throttle  // timepan, noleading, and trailing
     | ViewTransition
-    | Window
+    | Window    // listen on the window
+    | Document  // listen on the document
     | Outside
     | Prevent
     | Stop
@@ -400,7 +420,7 @@ Elem.div [
 Datastar provides a number of actions and functions that can be used in [Datastar expressions](https://data-star.dev/guide/datastar_expressions)
 for making server requests and manipulating signals.
 
-### [@get | @post | @put | @patch | @delete](https://data-star.dev/reference/actions#backend-plugins)
+### [@get | @post | @put | @patch | @delete | @query](https://data-star.dev/reference/actions#backend-plugins)
 
 These actions make requests to any backend service that supports Server Side Events (SSE).
 Luckily an F#-friendly [SDK exists](https://data-star.dev/reference/sdks#dotnet) and `Falco.Datastar` has several [helper methods](#reading-signals-and-server-side-events)
@@ -418,7 +438,11 @@ Elem.button [ Ds.onClick (Ds.put "/put") ] [ Text.raw "Put" ]
 Elem.button [ Ds.onClick (Ds.patch "/patch") ] [ Text.raw "Patch" ]
 
 Elem.button [ Ds.onClick (Ds.delete "/delete") ] [ Text.raw "Delete" ]
+
+Elem.button [ Ds.onClick (Ds.query "/query") ] [ Text.raw "Query" ]
 ```
+
+`@query` sends the HTTP `QUERY` method: a safe, idempotent request that carries the signals in its body, like a `@get` that isn't limited to the query string.
 
 The majority of the above examples are fired from a button click, but remember that these are
 [Datastar expressions](https://data-star.dev/guide/datastar_expressions) and any [event or trigger](#_events-and-triggers_)
@@ -434,21 +458,54 @@ Elem.button [ Ds.onClick (Ds.get ("/endpoint",
                                  )) ] [ Text.raw "Push the Button" ]
 ```
 
-### [`@setAll`](https://data-star.dev/reference/actions#setall)
+Options that are new since Datastar 1.0:
 
-Sets all the signals that start with the prefix to the expression provided in the second argument.
-This is useful for setting all the values of a signal namespace at once.
+- `RequestCancellation = Cleanup` also cancels the request when the element it is on is removed from the DOM.
+- `ContentType = CustomJson obj` sends the object as the request payload, in place of the signals.
+- `ResponseOverrides` replaces what the server sent in the events of the response: `OverrideElements` overrides the
+  selector, mode, and view transition of patch-elements events, and `OverrideSignals` overrides `onlyIfMissing` of patch-signals events.
 
 ```fsharp
-Elem.div [ Ds.onEvent (OnEvent.SignalsChanged, (Ds.setAll "foo." true)) ] []
+Elem.button [ Ds.onClick (Ds.get ("/endpoint",
+                                  { RequestOptions.Defaults with
+                                        ResponseOverrides =
+                                            ValueSome (OverrideElements { ElementsOverrides.None with
+                                                                              Selector = ValueSome "#results"
+                                                                              Mode = ValueSome Append }) }
+                                 )) ] [ Text.raw "Load more" ]
 ```
+
+### [`@setAll`](https://data-star.dev/reference/actions#setall)
+
+Sets all the signals that start with the prefix to the value provided in the second argument.
+This is useful for setting all the values of a signal namespace at once. Strings are quoted; numbers and booleans are not.
+Since Datastar 1.0 the action takes the value first and a filter second, and `Ds.setAll` builds that filter from the prefix.
+
+```fsharp
+Elem.button [ Ds.onClick (Ds.setAll ("foo.", true)) ] [ Text.raw "Check all" ]
+```
+
+```html
+<button data-on:click="@setAll(true, { include: /^foo\./ })">Check all</button>
+```
+
+`Ds.setAllFiltered` takes any `SignalsFilter` instead of a prefix, or `SignalsFilter.None` to set every signal.
 
 ### [`@toggleAll`](https://data-star.dev/reference/actions#toggleall)
 
 Toggles all the signals that start with the prefix. This is useful for toggling all the values of a signal namespace at once.
+`Ds.toggleAllFiltered` takes any `SignalsFilter` instead of a prefix.
 
 ```fsharp
-Elem.div [ Ds.onEvent (OnEvent.SignalsChanged, (Ds.toggleAll "foo.")) ] []
+Elem.button [ Ds.onClick (Ds.toggleAll "foo.") ] [ Text.raw "Toggle all" ]
+```
+
+### [`@peek`](https://data-star.dev/reference/actions#peek)
+
+Evaluates an expression without subscribing to the signals it reads. Useful in `Ds.effect` when a signal should be read but must not re-run the effect.
+
+```fsharp
+Elem.div [ Ds.effect $"""$last = {Ds.peek "$count"}""" ] []
 ```
 
 ### [Ds.ignore | Ds.ignoreSelf | Ds.ignoreMorph : `data-star-ignore`](https://data-star.dev/reference/attributes#data-ignore)

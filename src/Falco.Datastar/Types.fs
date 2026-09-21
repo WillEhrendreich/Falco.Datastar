@@ -5,6 +5,7 @@ open System.Collections.Generic
 open System.Text
 open System.Text.Json
 open System.Text.Json.Nodes
+open System.Text.RegularExpressions
 open System.Web
 open Falco.Markup
 open StarFederation.Datastar.FSharp
@@ -18,6 +19,9 @@ type SignalsFilter =
     static member None = { IncludePattern = ValueNone; ExcludePattern = ValueNone }
     static member Include pattern =  { IncludePattern = ValueSome pattern; ExcludePattern = ValueNone }
     static member Exclude pattern =  { IncludePattern = ValueNone; ExcludePattern = ValueSome pattern }
+    /// Includes every signal whose path starts with the prefix, e.g. "form." matches "form.name" but not "formal"
+    static member Prefix (prefix:string) =
+        SignalsFilter.Include ("^" + Regex.Escape(prefix).Replace("/", "\\/"))
     static member Serialize (signalFilter:SignalsFilter) =
         if signalFilter = SignalsFilter.None then
             ""
@@ -83,11 +87,13 @@ type BackendAction =
     | Put of url:string
     | Patch of url:string
     | Delete of url:string
+    /// The HTTP QUERY method: a safe, idempotent request that carries a body
+    | Query of url:string
 
 type ContentType =
     /// default, filtered signals; default
     | Json
-    /// sends a custom object instead of the default, filtered signals
+    /// sends a custom object as the request payload instead of the default, filtered signals
     | CustomJson of obj
     /// validates inputs of closest form and sends them to the backend
     | Form
@@ -109,6 +115,8 @@ type RequestCancellation =
     | Auto
     /// allows concurrent requests
     | Disabled
+    /// like Auto, but also cancels the request when the element it is on is removed from the DOM
+    | Cleanup
     /// an object name that can be aborted; https://data-star.dev/reference/actions#request-cancellation;
     /// creator should include '$', e.g. (AbortController "$controller")
     | AbortController of string
@@ -117,6 +125,7 @@ type RequestCancellation =
         match requestCancellation with
         | Auto -> "auto"
         | Disabled -> "disabled"
+        | Cleanup -> "cleanup"
         | AbortController controller -> controller
 
 type ResponseOverrideMode =
@@ -128,6 +137,46 @@ type ResponseOverrideMode =
     | Append
     | Before
     | After
+    with
+    static member Serialize (mode:ResponseOverrideMode) =
+        match mode with
+        | Outer -> "outer"
+        | Inner -> "inner"
+        | Remove -> "remove"
+        | Replace -> "replace"
+        | Prepend -> "prepend"
+        | Append -> "append"
+        | Before -> "before"
+        | After -> "after"
+
+/// Values that replace what the server sent in a patch-elements event
+type ElementsOverrides =
+    { /// CSS selector of the element to patch, instead of the one the server named
+      Selector: string voption
+      /// How to patch, instead of the mode the server named
+      Mode: ResponseOverrideMode voption
+      /// Whether to wrap the patch in a view transition, instead of what the server named
+      UseViewTransition: bool voption }
+    with
+    static member None = { Selector = ValueNone; Mode = ValueNone; UseViewTransition = ValueNone }
+
+/// Overrides for the events a backend action receives; the client applies them regardless of what the server sent
+type ResponseOverrides =
+    /// Override how patch-elements events are applied
+    | OverrideElements of ElementsOverrides
+    /// Override whether patch-signals events only merge signals that are missing
+    | OverrideSignals of onlyIfMissing:bool
+    with
+    static member internal Serialize (responseOverrides:ResponseOverrides) =
+        let jsonObject = JsonObject()
+        match responseOverrides with
+        | OverrideElements overrides ->
+            overrides.Selector |> ValueOption.iter (fun selector -> jsonObject.Add("selector", selector))
+            overrides.Mode |> ValueOption.iter (fun mode -> jsonObject.Add("mode", ResponseOverrideMode.Serialize mode))
+            overrides.UseViewTransition |> ValueOption.iter (fun useViewTransition -> jsonObject.Add("useViewTransition", JsonValue.Create useViewTransition))
+        | OverrideSignals onlyIfMissing ->
+            jsonObject.Add("onlyIfMissing", JsonValue.Create onlyIfMissing)
+        jsonObject :> JsonNode
 
 /// Request Options for backend action plugins
 /// https://data-star.dev/reference/action_plugins
@@ -166,6 +215,10 @@ type RequestOptions = {
       /// An AbortSignal object that can be used to cancel the request.
       /// https://data-star.dev/reference/actions#request-cancellation
       RequestCancellation: RequestCancellation
+
+      /// Values that replace what the server sent in the events of the response.
+      /// https://data-star.dev/reference/actions#options
+      ResponseOverrides: ResponseOverrides voption
       }
     with
     static member Defaults =
@@ -178,7 +231,8 @@ type RequestOptions = {
           RetryScaler = 2.0
           RetryMaxWait = TimeSpan.FromSeconds(30.0)
           RetryMaxCount = 10
-          RequestCancellation = Auto }
+          RequestCancellation = Auto
+          ResponseOverrides = ValueNone }
 
     static member inline With contentType = { RequestOptions.Defaults with ContentType = contentType }
 
@@ -192,9 +246,8 @@ type RequestOptions = {
             jsonObject.Add("contentType", "form")
             jsonObject.Add("selector", formSelector)
         | CustomJson customJson ->
-            let serializedOverride = JsonSerializer.Serialize(customJson, JsonSerializerOptions.SignalsDefault)
             jsonObject.Add("contentType", "json")
-            jsonObject.Add("override", serializedOverride)
+            jsonObject.Add("payload", JsonSerializer.SerializeToNode(customJson, JsonSerializerOptions.SignalsDefault))
         | Json -> jsonObject.Add("contentType", "json")
 
         if backendActionOptions.FilterSignals <> RequestOptions.Defaults.FilterSignals then
@@ -223,6 +276,10 @@ type RequestOptions = {
         if backendActionOptions.RequestCancellation <> RequestOptions.Defaults.RequestCancellation then
             let requestCancellation = backendActionOptions.RequestCancellation |> RequestCancellation.Serialize
             jsonObject.Add("requestCancellation", requestCancellation)
+
+        backendActionOptions.ResponseOverrides
+        |> ValueOption.iter (fun responseOverrides ->
+            jsonObject.Add("responseOverrides", ResponseOverrides.Serialize responseOverrides))
 
         let options = JsonSerializerOptions()
         options.WriteIndented <- false
@@ -263,6 +320,8 @@ type OnEventModifier =
     | Throttle of Throttle
     /// Attaches the event listener to the window element.
     | Window
+    /// Attaches the event listener to the document.
+    | Document
     /// Triggers the event when it occurs outside the element.
     | Outside
     /// Call `preventDefault` on the event listener
@@ -323,6 +382,7 @@ type DsAttrModifier =
         | Throttle throttle -> (DsAttrModifier.Throttle throttle)
         | ViewTransition -> { Name = "viewtransition"; Tags = [] }
         | Window -> { Name = "window"; Tags = [] }
+        | Document -> { Name = "document"; Tags = [] }
         | Outside -> { Name = "outside"; Tags = [] }
         | Prevent -> { Name = "prevent"; Tags = [] }
         | Stop -> { Name = "stop"; Tags = [] }

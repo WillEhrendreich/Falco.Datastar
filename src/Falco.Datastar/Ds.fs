@@ -529,6 +529,23 @@ type Ds =
         expressions |> String.concat " ; "
 
     /// <summary>
+    /// Changes the casing of the name an attribute creates, with Datastar's __case modifier.
+    /// Datastar reads the name from an HTML attribute, and the HTML parser lowercases attribute names, so without this a signal is camelCase
+    /// (a class name or an event name is kebab-case). Use it when your server uses another style, such as snake_case JSON.
+    /// It works on Ds.bind, Ds.class', Ds.computed, Ds.indicator, Ds.onEvent and Ds.signal, which put the name in the attribute's key.
+    /// It does nothing on Ds.ref and Ds.signals, which put the name or the object in the attribute's value, or on attributes that create no name.
+    /// https://data-star.dev/reference/attributes#data-signals
+    /// </summary>
+    /// <param name="caseStyle">The casing to use</param>
+    /// <param name="attribute">The attribute to change, e.g. <c>Ds.signal (sp"myValue", 1)</c></param>
+    /// <returns>Attribute</returns>
+    static member withCase (caseStyle:CaseStyle) (attribute:XmlAttribute) =
+        let modifier = "__case." + CaseStyle.Serialize caseStyle
+        match attribute with
+        | KeyValueAttr (key, value) -> KeyValueAttr (key + modifier, value)
+        | NonValueAttr key -> NonValueAttr (key + modifier)
+
+    /// <summary>
     /// Gives Datastar the nonce of your Content Security Policy, so that it works on a page whose policy does not allow unsafe-eval.
     /// Put it on the &lt;html&gt; element. Datastar reads it once and then removes the attribute.
     /// Use the same nonce in your policy's script-src, on the script tag that loads Datastar, and here. The nonce must not be empty.

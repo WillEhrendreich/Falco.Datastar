@@ -159,6 +159,36 @@ module DsTests =
         renderAttr (Ds.bindEvent (SignalPath.sp "val", [ "input"; "change" ]))
         |> should equal """<div data-bind:val__event.input.change></div>"""
 
+    // The __case modifier changes the casing of the name an attribute creates (bind, class, computed, indicator, on, ref, signals)
+
+    [<Fact>]
+    let ``Ds.withCase adds the case modifier to an attribute with a value`` () =
+        renderAttr (Ds.signal (SignalPath.sp "myValue", 1) |> Ds.withCase CaseStyle.Snake)
+        |> should equal """<div data-signals:my-value__case.snake="1"></div>"""
+
+    [<Fact>]
+    let ``Ds.withCase adds the case modifier to an attribute without a value`` () =
+        renderAttr (Ds.bind (SignalPath.sp "myValue") |> Ds.withCase CaseStyle.Pascal)
+        |> should equal """<div data-bind:my-value__case.pascal></div>"""
+
+    [<Fact>]
+    let ``Ds.withCase can name each of the four styles`` () =
+        let styleOf caseStyle = renderAttr (Ds.indicator (SignalPath.sp "myValue") |> Ds.withCase caseStyle)
+        styleOf CaseStyle.Camel |> should equal """<div data-indicator:my-value__case.camel></div>"""
+        styleOf CaseStyle.Kebab |> should equal """<div data-indicator:my-value__case.kebab></div>"""
+        styleOf CaseStyle.Snake |> should equal """<div data-indicator:my-value__case.snake></div>"""
+        styleOf CaseStyle.Pascal |> should equal """<div data-indicator:my-value__case.pascal></div>"""
+
+    [<Fact>]
+    let ``Ds.withCase keeps modifiers that are already there`` () =
+        renderAttr (Ds.signal (SignalPath.sp "myValue", 1, ifMissing = true) |> Ds.withCase CaseStyle.Snake)
+        |> should equal """<div data-signals:my-value__ifmissing__case.snake="1"></div>"""
+
+    [<Fact>]
+    let ``Ds.withCase on an event name lets a camelCase event be listened to`` () =
+        renderAttr (Ds.onEvent ("my-event", "$seen = true") |> Ds.withCase CaseStyle.Camel)
+        |> should equal """<div data-on:my-event__case.camel="$seen = true"></div>"""
+
     // Content Security Policy: Datastar reads data-nonce from the <html> element (csp.ts)
 
     [<Fact>]

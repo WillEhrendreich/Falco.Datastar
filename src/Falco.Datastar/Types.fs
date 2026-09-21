@@ -358,6 +358,25 @@ type OnEventModifier =
     /// Wrap the expression in document.startViewTransition(), if View Transition API is available
     | ViewTransition
 
+/// The casing Datastar gives to the name an attribute creates. Write it with its type name, e.g. CaseStyle.Snake
+[<RequireQualifiedAccess>]
+type CaseStyle =
+    /// mySignal
+    | Camel
+    /// my-signal
+    | Kebab
+    /// my_signal
+    | Snake
+    /// MySignal
+    | Pascal
+    with
+    static member Serialize (caseStyle:CaseStyle) =
+        match caseStyle with
+        | CaseStyle.Camel -> "camel"
+        | CaseStyle.Kebab -> "kebab"
+        | CaseStyle.Snake -> "snake"
+        | CaseStyle.Pascal -> "pascal"
+
 /// <summary>
 /// Modifier for a DsAttr. &lt;data-...__Name.Tag.Tag=...&gt;
 /// </summary>

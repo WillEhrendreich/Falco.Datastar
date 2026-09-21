@@ -1,75 +1,95 @@
 open System
+open System.Threading.Channels
+open System.Threading.Tasks
 open Falco
-open Falco.Datastar.SignalPath
 open Falco.Markup
 open Falco.Routing
 open Falco.Datastar
 open Microsoft.AspNetCore.Builder
+open Microsoft.AspNetCore.ResponseCompression
+open Microsoft.Extensions.DependencyInjection
 
-// Rocket components are written in JavaScript. The server renders their tags, props and children.
-// `my-counter` uses shadow DOM. The server sends its props as attributes and changes them by patching the element.
-// `my-toggle` uses light DOM. The server renders its children, which use the component's own signals and actions.
-let components = $"""
-import {{ rocket }} from '{Ds.rocketCdnSrc}'
+// This example follows the Tao of Datastar (https://data-star.dev/guide/the_tao_of_datastar).
+//
+// - State in the right place: the server owns the count, and every visitor sees the same one. The browser only keeps state that one
+//   section needs for itself, whether it is open, and that state never leaves the browser.
+// - CQRS: the page opens one long-lived request that the server writes updates to (a read), and a click sends a short request (a write).
+//   The write answers 204 No Content. The new count reaches the page over the stream, and never before the server has confirmed it.
+// - Fat morph: the server sends the whole component again, and Datastar morphs only what changed.
+// - Start with the defaults: no request option is set.
+// - Compression: the stream is compressed with Brotli.
 
-rocket('my-counter', {{
-  props: ({{ number, string }}) => ({{
-    count: number.default(0),
-    step: number.default(1),
-    label: string.default('Count'),
-  }}),
-  render: ({{ html, props }}) => html`
-    <p>
-      <strong>${{props.label}}</strong>
-      <button data-on:click="@post('/counter/change?by=${{-props.step}}')">-</button>
-      <output>${{props.count}}</output>
-      <button data-on:click="@post('/counter/change?by=${{props.step}}')">+</button>
-    </p>
-    <template data-if="${{props.count}} >= 10"><p>That is a lot.</p></template>
-    <template data-else><p>Keep going.</p></template>
+// Rocket components are written in JavaScript, so this is the only JavaScript in the example.
+// `my-counter` shows a count. It does not know what a click means. It emits an event, and the page decides what to do about it.
+// `my-toggle` has no code at all. The server renders its children, and they keep their state in the component.
+let components =
+    "import { rocket } from '" + Ds.rocketCdnSrc + "'\n" + """
+rocket('my-counter', {
+  props: ({ number, string }) => ({ count: number.default(0), label: string.default('Count') }),
+  setup({ action, emit }) {
+    action('decrement', () => emit('decrement'))
+    action('increment', () => emit('increment'))
+  },
+  render: ({ html, props }) => html`
+    <strong>${props.label}</strong>
+    <button data-on:click="@decrement()">-</button>
+    <output>${props.count}</output>
+    <button data-on:click="@increment()">+</button>
   `,
-}})
-
-rocket('my-toggle', {{
-  mode: 'light',
-  setup({{ $$, action }}) {{
-    $$('on', false)
-    $$('log', [])
-    action('flip', ({{ state }}) => {{
-      state.on = !state.on
-      state.log = [...state.log, state.on ? 'on' : 'off']
-    }})
-  }},
-}})
+})
+rocket('my-toggle', { mode: 'light' })
 """
 
-let mutable count = 0
+// The counter lives in one agent, so no other code can change the count or the list of viewers.
+type CounterMessage =
+    | Read of AsyncReplyChannel<int>
+    | Change of by:int
+    | Watch of Channel<int> * AsyncReplyChannel<int>
+    | Unwatch of Channel<int>
 
 let counter =
+    MailboxProcessor.Start(fun inbox ->
+        let rec loop count (watchers:Channel<int> list) = async {
+            match! inbox.Receive() with
+            | Read reply ->
+                reply.Reply count
+                return! loop count watchers
+            | Change by ->
+                let next = max 0 (count + by)
+                watchers |> List.iter (fun watcher -> watcher.Writer.TryWrite next |> ignore)
+                return! loop next watchers
+            | Watch (watcher, reply) ->
+                reply.Reply count
+                return! loop count (watcher :: watchers)
+            | Unwatch watcher ->
+                return! loop count (watchers |> List.filter (fun other -> not (obj.ReferenceEquals(other, watcher))))
+        }
+        loop 0 [])
+
+let counterElement count =
     Elem.create "my-counter"
         [ Attr.id "counter"
           Rocket.propString ("label", "Clicks")
-          Rocket.propNumber ("step", 1)
-          Rocket.propNumber ("count", count) ]
+          Rocket.propNumber ("count", count)
+          Ds.onEvent ("decrement", Stmt.post "/counter/decrement")
+          Ds.onEvent ("increment", Stmt.post "/counter/increment") ]
         []
 
-let toggleFrom (stamp:string) =
-    Elem.create "my-toggle" [ Attr.id "toggle" ] [
-        Elem.p [ Attr.id "stamp" ] [ Text.raw $"rendered by the server at {stamp}" ]
-        Elem.button [ Attr.id "flip"; Ds.onClick (Rocket.call "flip") ] [ Text.raw "Toggle" ]
-        Elem.p [ Attr.id "state"; Ds.text $"""{Rocket.local "on"} ? 'on' : 'off'""" ] []
-        Elem.p [ Attr.id "shown"; Ds.show (Rocket.local "on") ] [ Text.raw "Now you see me." ]
-        Elem.ul [ Attr.id "log" ] [
-            Rocket.templateFor (Rocket.local "log", [ Elem.li [ Ds.text "n + ': ' + entry" ] [] ], item = "entry", index = "n")
-        ]
-        Elem.label [] [ Text.raw "Page signal, bound from inside the component: " ]
-        Elem.input [ Attr.id "rooted"; Rocket.root (Ds.bind "query") ]
-        Elem.label [] [ Text.raw " Component signal: " ]
-        Elem.input [ Attr.id "scoped"; Ds.bind "note" ]
-        Elem.p [ Attr.id "note" ] [ Text.raw "note: "; Elem.span [ Ds.text (Rocket.local "note") ] [] ]
+// Each section keeps its own `open` state. It is a Rocket component signal, so two sections do not share it.
+let section id' title =
+    let isOpen = Signal.rocket<bool> "open"
+    Elem.create "my-toggle" [ Attr.id id' ] [
+        Elem.div [ Ds.signal (isOpen, false) ] []
+        Elem.button
+            [ Attr.id $"{id'}-button"
+              Ds.onClick (Stmt.toggle isOpen)
+              Ds.attr' ("aria-expanded", Expr.ifElse (Expr.read isOpen) (Expr.string "true") (Expr.string "false")) ]
+            [ Text.raw title ]
+        Elem.p [ Attr.id $"{id'}-body"; Ds.show (Expr.read isOpen) ] [ Text.raw "Only this section knows that it is open." ]
     ]
 
-let handleIndex : HttpHandler =
+let handleIndex : HttpHandler = fun ctx -> task {
+    let! count = counter.PostAndAsyncReply Read |> Async.StartAsTask
     let html =
         Elem.html [] [
             Elem.head [] [
@@ -77,43 +97,56 @@ let handleIndex : HttpHandler =
                 Ds.rocketCdnScript
                 Elem.script [ Attr.type' "module" ] [ Text.raw components ]
             ]
-            Elem.body [ Ds.signal (sp"query", "") ] [
+            // The long-lived request: the server writes to it whenever the count changes
+            Elem.body [ Ds.onInit (Stmt.get "/counter/stream") ] [
                 Text.h1 "Example: Rocket Components"
-                Elem.h2 [] [ Text.raw "my-counter: props from the server" ]
-                counter
-                Elem.h2 [] [ Text.raw "my-toggle: children from the server" ]
-                toggleFrom "first load"
-                Elem.button [ Attr.id "patch"; Ds.onClick (Ds.post "/toggle/patch") ] [ Text.raw "Patch the toggle's children from the server" ]
-                Elem.p [ Attr.id "query" ] [ Text.raw "page query: "; Elem.span [ Ds.text "$query" ] [] ]
+                Elem.h2 [] [ Text.raw "my-counter: the server owns the count" ]
+                Elem.p [] [ Text.raw "Every visitor sees the same count. A click sends a command, and the change comes back over the stream that this page opened." ]
+                counterElement count
+                Elem.h2 [] [ Text.raw "my-toggle: state that only the browser needs" ]
+                section "first" "First section"
+                section "second" "Second section"
             ]
         ]
-    Response.ofHtml html
+    return! Response.ofHtml html ctx
+}
 
-let handleChange : HttpHandler = fun ctx ->
-    let by =
-        match Int32.TryParse(string ctx.Request.Query["by"]) with
-        | true, value -> value
-        | _ -> 0
-    count <- max 0 (count + by)
-    let patched =
-        Elem.create "my-counter"
-            [ Attr.id "counter"
-              Rocket.propString ("label", "Clicks")
-              Rocket.propNumber ("step", 1)
-              Rocket.propNumber ("count", count) ]
-            []
-    Response.ofHtmlElements patched ctx
+let handleStream : HttpHandler = fun ctx -> task {
+    let watcher = Channel.CreateUnbounded<int>()
+    let! current = counter.PostAndAsyncReply(fun reply -> Watch (watcher, reply)) |> Async.StartAsTask
+    try
+        do! Response.sseStartResponse ctx
+        do! Response.sseHtmlElements ctx (counterElement current)
+        // All Datastar methods and the read below throw when the visitor leaves, which ends the loop
+        while true do
+            let! next = watcher.Reader.ReadAsync ctx.RequestAborted
+            do! Response.sseHtmlElements ctx (counterElement next)
+    finally
+        counter.Post (Unwatch watcher)
+}
 
-let handlePatchToggle : HttpHandler = fun ctx ->
-    Response.ofHtmlElements (toggleFrom (DateTime.Now.ToString "HH:mm:ss.fff")) ctx
-
-let wapp = WebApplication.Create()
+let command by : HttpHandler = fun ctx ->
+    counter.Post (Change by)
+    ctx.Response.StatusCode <- 204
+    Task.CompletedTask
 
 let endpoints =
     [ get "/" handleIndex
-      post "/counter/change" handleChange
-      post "/toggle/patch" handlePatchToggle ]
+      get "/counter/stream" handleStream
+      post "/counter/increment" (command 1)
+      post "/counter/decrement" (command -1) ]
 
-wapp.UseRouting()
-    .UseFalco(endpoints)
-    .Run()
+let builder = WebApplication.CreateBuilder()
+
+// Compression: a stream of morphs compresses very well. Response compression skips text/event-stream unless you add it.
+builder.Services.AddResponseCompression(fun options ->
+    options.EnableForHttps <- true
+    options.Providers.Add<BrotliCompressionProvider>()
+    options.MimeTypes <- Seq.append ResponseCompressionDefaults.MimeTypes [ "text/event-stream" ])
+|> ignore
+
+let wapp = builder.Build()
+
+wapp.UseResponseCompression() |> ignore
+wapp.UseRouting().UseFalco(endpoints) |> ignore
+wapp.Run()

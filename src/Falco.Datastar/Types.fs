@@ -22,8 +22,11 @@ type SignalsFilter =
     /// Includes every signal whose path starts with the prefix, e.g. "form." matches "form.name" but not "formal"
     static member Prefix (prefix:string) =
         SignalsFilter.Include ("^" + Regex.Escape(prefix).Replace("/", "\\/"))
+    /// True when the filter has neither an include nor an exclude pattern. It does not allocate, unlike comparing with SignalsFilter.None
+    static member internal IsNone (signalFilter:SignalsFilter) =
+        signalFilter.IncludePattern = ValueNone && signalFilter.ExcludePattern = ValueNone
     static member Serialize (signalFilter:SignalsFilter) =
-        if signalFilter = SignalsFilter.None then
+        if SignalsFilter.IsNone signalFilter then
             ""
         else
             StringBuilder()
@@ -185,17 +188,7 @@ type RequestOptions = {
       RequestCancellation: RequestCancellation
       }
     with
-    static member Defaults =
-        { ContentType = Json
-          FilterSignals = SignalsFilter.None
-          Headers = []
-          OpenWhenHidden = ValueNone
-          Retry = Retry.OnAuto
-          RetryInterval = TimeSpan.FromSeconds(1.0)
-          RetryScaler = 2.0
-          RetryMaxWait = TimeSpan.FromSeconds(30.0)
-          RetryMaxCount = 10
-          RequestCancellation = Auto }
+    static member Defaults = RequestOptionsDefaults.Value
 
     static member inline With contentType = { RequestOptions.Defaults with ContentType = contentType }
 
@@ -246,6 +239,20 @@ type RequestOptions = {
         let options = JsonSerializerOptions()
         options.WriteIndented <- false
         HttpUtility.HtmlEncode(jsonObject.ToJsonString(options))
+
+/// The one copy of RequestOptions.Defaults. A property that builds a new record is read about ten times for every request option that is written.
+and internal RequestOptionsDefaults private () =
+    static member val Value : RequestOptions =
+        { ContentType = Json
+          FilterSignals = SignalsFilter.None
+          Headers = []
+          OpenWhenHidden = ValueNone
+          Retry = Retry.OnAuto
+          RetryInterval = TimeSpan.FromSeconds(1.0)
+          RetryScaler = 2.0
+          RetryMaxWait = TimeSpan.FromSeconds(30.0)
+          RetryMaxCount = 10
+          RequestCancellation = Auto } with get
 
 type Debounce =
     { TimeSpan:TimeSpan

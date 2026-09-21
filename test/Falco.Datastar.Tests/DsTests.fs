@@ -250,6 +250,10 @@ module DsTests =
         |> should equal "@get('/x',{})"
 
     [<Fact>]
+    let ``RequestOptions.Defaults is one shared object, because it is read many times for every option that is written`` () =
+        obj.ReferenceEquals(RequestOptions.Defaults, RequestOptions.Defaults) |> should equal true
+
+    [<Fact>]
     let ``RequestOptions OpenWhenHidden is not set by default`` () =
         RequestOptions.Defaults.OpenWhenHidden
         |> should equal (ValueNone : bool voption)

@@ -61,3 +61,17 @@ module EscapingTests =
     let ``Ds.bindEvent and Ds.bindProp refuse an empty name`` () =
         Assert.Throws<ArgumentException>(fun () -> Ds.bindEvent (SignalPath.sp "val", " ") |> ignore) |> ignore
         Assert.Throws<ArgumentException>(fun () -> Ds.bindProp (SignalPath.sp "val", "") |> ignore) |> ignore
+
+    // The escaping has a fast path for text that needs none. This compares it with the plain chain of replacements it stands in for.
+    [<Fact>]
+    let ``Escaping gives the same result as the plain chain of replacements, for many strings`` () =
+        let reference (value: string) =
+            value.Replace("\\", "\\\\").Replace("'", "\\'").Replace("\n", "\\n").Replace("\r", "\\r")
+                 .Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;")
+        let alphabet = [| 'a'; 'Z'; '0'; ' '; '/'; '?'; '='; '\\'; '\''; '\n'; '\r'; '&'; '<'; '>'; '"'; '$'; '@'; '(' ; ')'; ';'; '\u2028'; 'é' |]
+        let random = Random 42
+        for _ in 1 .. 3000 do
+            let text = String(Array.init (random.Next(0, 24)) (fun _ -> alphabet.[random.Next alphabet.Length]))
+            Expr.toString (Expr.string text) |> should equal ("'" + reference text + "'")
+            Ds.get text |> should equal ("@get('" + reference text + "')")
+

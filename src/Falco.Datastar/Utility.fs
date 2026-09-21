@@ -1,6 +1,7 @@
 namespace Falco.Datastar
 
 open System
+open System.Buffers
 open System.Globalization
 open System.Text
 open System.Text.RegularExpressions
@@ -10,7 +11,7 @@ module internal String =
 
     /// A copy of Datastar's own kebab function (library/src/utils/text.ts). Rocket uses it to turn a prop name into an attribute name.
     /// Unlike toKebab, it also splits acronyms and digits: "innerHTML" becomes "inner-html" and "pos3d" becomes "pos-3-d".
-    let datastarKebab (value:string) =
+    let computeDatastarKebab (value:string) =
         let replace (pattern:string) (replacement:string) (options:RegexOptions) (input:string) =
             Regex.Replace(input, pattern, replacement, options)
         value
@@ -20,6 +21,17 @@ module internal String =
         |> replace "([0-9]+)([a-z])" "$1-$2" RegexOptions.IgnoreCase
         |> replace "[\\s_]+" "-" RegexOptions.None
         |> fun kebab -> kebab.ToLowerInvariant()
+
+    /// Prop names are written in code and repeat on every render, so each one is worked out once. The cache stops growing at 1000 names, in case a name ever comes from user input.
+    let kebabCache = System.Collections.Concurrent.ConcurrentDictionary<string, string>()
+
+    let datastarKebab (value:string) =
+        match kebabCache.TryGetValue value with
+        | true, kebab -> kebab
+        | false, _ ->
+            let kebab = computeDatastarKebab value
+            if kebabCache.Count < 1000 then kebabCache.TryAdd(value, kebab) |> ignore
+            kebab
     let split (delimiters:string seq) (line:string) = line.Split(delimiters |> Seq.toArray, StringSplitOptions.None)
     let IsPopulated = String.IsNullOrWhiteSpace >> not
     let toKebab (pascalString:string) =
@@ -34,13 +46,42 @@ module internal String =
 /// Builds JavaScript literals that are safe inside a double-quoted HTML attribute.
 /// Falco.Markup does not escape attribute values, so anything put into an expression must be escaped here.
 module internal Js =
+    /// The characters that need escaping in an attribute, and in a single-quoted JavaScript string inside one.
+    /// Most text has none of them, and then it is returned as it is, without a copy.
+    let attributeSpecials = SearchValues.Create "&<>\""
+    let stringSpecials = SearchValues.Create "\\'\n\r&<>\""
+
     let attrEncode (value:string) =
-        value.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;")
+        match value.AsSpan().IndexOfAny attributeSpecials with
+        | -1 -> value
+        | first ->
+            let builder = StringBuilder(value.Length + 16).Append(value, 0, first)
+            for index in first .. value.Length - 1 do
+                match value.[index] with
+                | '&' -> builder.Append "&amp;" |> ignore
+                | '<' -> builder.Append "&lt;" |> ignore
+                | '>' -> builder.Append "&gt;" |> ignore
+                | '"' -> builder.Append "&quot;" |> ignore
+                | other -> builder.Append other |> ignore
+            builder.ToString()
 
     let stringLiteral (value:string) =
-        value.Replace("\\", "\\\\").Replace("'", "\\'").Replace("\n", "\\n").Replace("\r", "\\r")
-        |> attrEncode
-        |> fun escaped -> "'" + escaped + "'"
+        match value.AsSpan().IndexOfAny stringSpecials with
+        | -1 -> String.Concat("'", value, "'")
+        | first ->
+            let builder = StringBuilder(value.Length + 18).Append('\'').Append(value, 0, first)
+            for index in first .. value.Length - 1 do
+                match value.[index] with
+                | '\\' -> builder.Append "\\\\" |> ignore
+                | '\'' -> builder.Append "\\'" |> ignore
+                | '\n' -> builder.Append "\\n" |> ignore
+                | '\r' -> builder.Append "\\r" |> ignore
+                | '&' -> builder.Append "&amp;" |> ignore
+                | '<' -> builder.Append "&lt;" |> ignore
+                | '>' -> builder.Append "&gt;" |> ignore
+                | '"' -> builder.Append "&quot;" |> ignore
+                | other -> builder.Append other |> ignore
+            builder.Append('\'').ToString()
 
     /// camelCase names, to match the JavaScript objects Rocket props are read into. This is one shared instance, because creating options on every call is slow.
     let webJsonOptions = System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)

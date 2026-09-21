@@ -182,7 +182,8 @@ type ElementsOverrides =
     with
     static member None = { Selector = ValueNone; Mode = ValueNone; Namespace = ValueNone; UseViewTransition = ValueNone }
 
-/// Values that replace what the server sends in the events a backend action receives. The browser applies them whatever the server said
+/// Values that replace what the server sends in the events a backend action receives. The browser applies them whatever the server said.
+/// Datastar 1.0.4 supports this option, but Datastar's documentation does not describe it, so it may change
 type ResponseOverrides =
     /// Override how patch-elements events are applied
     | OverrideElements of ElementsOverrides

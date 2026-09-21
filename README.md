@@ -493,7 +493,7 @@ These options are also available in Datastar 1.0.4:
 
 - `RequestCancellation = Cleanup` cancels the request when the element it is on is removed from the page.
 - `ContentType = CustomJson obj` sends the object as the request body, instead of the signals.
-- `ResponseOverrides` replaces values the server put in its response events. `OverrideElements` replaces the selector, mode, namespace and view transition of patch-elements events. `OverrideSignals` replaces `onlyIfMissing` on patch-signals events.
+- `ResponseOverrides` replaces values the server put in its response events. Datastar 1.0.4 supports it, but Datastar's documentation does not describe it, so it may change. `OverrideElements` replaces the selector, mode, namespace and view transition of patch-elements events. `OverrideSignals` replaces `onlyIfMissing` on patch-signals events.
 
 ```fsharp
 Elem.button [ Ds.onClick (Ds.get ("/endpoint",
@@ -863,6 +863,37 @@ let appendRows =
 
 Response.ofHtmlElementsOptions appendRows (Elem.tr [] [ Elem.td [] [ Text.raw "New row" ] ])
 ```
+
+## _Responding without Server Side Events_
+
+A backend action does not have to answer with an event stream. Datastar also handles [plain responses](https://data-star.dev/reference/actions#response-handling), by their content type:
+`text/html` patches elements, `application/json` patches signals, and `text/javascript` runs a script.
+Response headers that start with `datastar-` adjust what happens. Falco already has what you need to send these, so this library adds no functions for them.
+
+```fsharp
+// open Microsoft.AspNetCore.Http
+
+// text/html: add an element to the end of a list
+let handleAdd : HttpHandler =
+    Response.withHeaders [ "datastar-selector", "#list"; "datastar-mode", "append" ]
+    >> Response.ofHtml (Elem.li [] [ Text.raw "New item" ])
+
+// application/json: patch signals, and keep the ones that already exist
+let handleDefaults : HttpHandler =
+    Response.withHeaders [ "datastar-only-if-missing", "true" ]
+    >> Response.ofJson {| count = 0 |}
+
+// text/javascript: run a script in the browser
+let handleScript : HttpHandler = fun ctx ->
+    ctx.Response.ContentType <- "text/javascript"
+    ctx.Response.WriteAsync "console.log('hello from the server')"
+```
+
+- `text/html` accepts the headers `datastar-selector`, `datastar-mode` and `datastar-use-view-transition`.
+- `application/json` accepts `datastar-only-if-missing`, which keeps the signals that already exist.
+- `text/javascript` accepts `datastar-script-attributes`, a JSON object of attributes for the script element.
+
+`Response.ofPlainText` sets the content type to `text/plain`, so a JavaScript response has to set `text/javascript` itself, as in the sample.
 
 ## _Streaming Server Side Events_
 

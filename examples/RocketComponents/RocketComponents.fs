@@ -21,7 +21,7 @@ open Microsoft.Extensions.DependencyInjection
 
 // Rocket components are written in JavaScript, so this is the only JavaScript in the example.
 // `my-counter` shows a count. It does not know what a click means. It emits an event, and the page decides what to do about it.
-// `my-toggle` has no code at all. The server renders its children, and they keep their state in the component.
+// `my-toggle` has no props, setup or render code. The server renders its children, and they keep their state in the component.
 let components =
     "import { rocket } from '" + Ds.rocketCdnSrc + "'\n" + """
 rocket('my-counter', {

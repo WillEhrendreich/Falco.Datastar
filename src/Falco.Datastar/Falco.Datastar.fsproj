@@ -14,6 +14,8 @@
     <DebugType>embedded</DebugType>
     <OutputType>Library</OutputType>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- A new advisory on a package we depend on should show up as a warning, not break the build on a day when no code changed -->
+    <WarningsNotAsErrors>NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
 

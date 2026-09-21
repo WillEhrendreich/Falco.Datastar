@@ -180,6 +180,15 @@ module EscapingTests =
         |> should haveSubstring "The modifier value 'a b' cannot be used"
 
     [<Fact>]
+    let ``Whitespace and control characters that are not ASCII are refused too`` () =
+        for character in [ '\u00A0'; '\u2003'; '\u3000'; '\u0085'; '\u007F'; '\u2028'; '\t'; '\n'; '\f' ] do
+            refusalOf (fun () -> Ds.class' ($"a{character}b", "$a"))
+            |> should haveSubstring "because it contains whitespace or a control character"
+        for character in [ '"'; '\''; '`'; '<'; '>'; '/'; '=' ] do
+            refusalOf (fun () -> Ds.class' ($"a{character}b", "$a"))
+            |> should haveSubstring $"because it contains '{character}'"
+
+    [<Fact>]
     let ``An empty name is refused, because Datastar would read an attribute with no name`` () =
         refusalOf (fun () -> Ds.onEvent ("", "$a"))
         |> should equal "The event name '' cannot be used in a data- attribute name, because it is empty. Write a name."

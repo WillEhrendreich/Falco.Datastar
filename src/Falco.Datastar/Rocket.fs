@@ -36,9 +36,10 @@ type Rocket =
         $"@{name}({arguments})"
 
     /// <summary>
-    /// Makes a bind, computed, indicator or ref attribute use the page's signal instead of the component's own.
+    /// Makes a bind, computed or indicator attribute use the page's signal instead of the component's own.
     /// Rocket normally ties these attributes to the component instance. This opts one attribute out, using Rocket's <c>__root</c> modifier.
-    /// It does not work on <c>data-signals</c>, which Rocket always ties to the instance.
+    /// It does not work on <c>data-signals</c>, which Rocket always ties to the instance. It has no effect on <c>data-ref</c> either:
+    /// Datastar 1.0.4 turns every ref in a component into a component reference before it looks for <c>__root</c>, although Datastar's Rocket reference says otherwise.
     /// </summary>
     /// <param name="attribute">The attribute to opt out, e.g. <c>Ds.bind "query"</c></param>
     /// <returns>Attribute</returns>

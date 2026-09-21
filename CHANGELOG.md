@@ -7,8 +7,10 @@
 - Typed signals, expressions and statements: `Signal.browser`, `Signal.server`, `Signal.rocket`, `Expr` and `Stmt`, and overloads of the `Ds` attributes that take them.
 - Rocket helpers: props, component signals, template directives and a reader for the manifest that `publishRocketManifests` posts.
 - `Ds.nonce` for Content Security Policy mode, `Ds.withCase` for the `__case` modifier, `Ds.bindProp` and `Ds.bindEvent`, `Ds.query`, `Ds.peek`, `Ds.setAllFiltered` and `Ds.toggleAllFiltered`.
-- `RequestCancellation.Cleanup`, `OnEventModifier.Document`, and `PatchElementsOptions.ViewTransitionSelector` from SDK 1.4.0.
+- `RequestCancellation.Cleanup` and `OnEventModifier.Document`, and, from SDK 1.4.0, `PatchElementsOptions.ViewTransitionSelector`.
 - Datastar 1.0.4 is the default script, and Rocket has its own script helper, `Ds.rocketCdnScript`.
+- Names are checked. A signal name that Datastar would read differently from an expression, and a name that could end an attribute name early, raise an error that says what to write. See [names that are refused](#names-that-are-refused).
+- Request options that never worked now do: `FilterSignals` and `AbortController`. See the output changes below.
 
 ### Upgrading
 
@@ -30,6 +32,10 @@ Take care with `OpenWhenHidden = false`. The old code never sent it, so `@post`,
 `ValueSome false` is sent, so those requests are now cancelled when the page is hidden and started again when it is visible.
 If you want the old behaviour, delete the line. On a `@get`, `ValueSome false` is the same as leaving it out.
 
+**Overloads.** The typed `Ds.text`, `Ds.show`, `Ds.class'`, `Ds.signal`, `Ds.computed`, `Ds.indicator`, `Ds.onEvent`, `Ds.onClick`, `Ds.onInit`, `Ds.effect`, `Ds.onInterval`, `Ds.onIntersect` and `Ds.onSignalPatch` are overloads of the string versions.
+Code that passes an argument whose type is not yet known, such as `let click handler = Elem.button [ Ds.onClick handler ] []`, or `List.map Ds.show`, now fails with error FS0041, "A unique overload for method could not be determined".
+Add a type annotation: `let click (handler: string) = ...`. Code that passes a string or a typed value directly needs no change. `Ds.signal` is also no longer `inline`, which changes nothing for callers.
+
 #### Changes that produce warnings
 
 Three types have a new case: `BackendAction.Query`, `RequestCancellation.Cleanup` and `OnEventModifier.Document`.
@@ -38,7 +44,7 @@ Add a case for the new value, or a `_` case. Until you do, a value that reaches 
 
 #### Name clashes
 
-`open Falco.Datastar` now brings `Query`, `Cleanup` and `Document` into scope as union cases.
+`open Falco.Datastar` now brings `Query`, `Cleanup` and `Document` into scope as union cases, and `Expr`, `Stmt` and `Signal` into scope as types and modules. `Expr` is also the name of `Microsoft.FSharp.Quotations.Expr`.
 If your own code declares a union case with one of these names, and you open `Falco.Datastar` *after* that declaration, your name now means Falco's case. You get errors such as "expected to have type `Msg` but here has type `BackendAction`".
 Either move `open Falco.Datastar` above your type, or put the type name in front of the case:
 
@@ -60,20 +66,45 @@ Tests that compare the generated text may need new expected values.
 They now write `@setAll(true, { include: /^foo\./ })` and `@toggleAll({ include: /^foo\./ })`. Your code needs no change, but tests that compare the generated text need new expected values.
 Numbers are now written as numbers: `Ds.setAll ("foo.", 5)` used to write `'5'`, which is text, and now writes `5`. If you want text, pass a string.
 
-**`RequestOptions.Retry`.** It used to be ignored, because the library never wrote it. `Retry = OnError`, `OnAlways` and `OnNever` now take effect, so if your code sets one of them, the retry behaviour of that request changes.
+**`RequestOptions.Retry`.** It used to be ignored, because the library never wrote it. `Retry = OnError`, `OnAlways` and `OnNever` are now sent, so if your code sets one of them, the retry behaviour of that request changes.
+`OnNever` stops the retries of a response that is not 200. Datastar 1.0.4 still retries after a network error, up to `RetryMaxCount` times.
 
 **`RequestOptions.RetryMaxWait`.** It was written as `retryMaxWaitMs`. Datastar stopped reading that name in 1.0.0 (RC.8 and earlier read it), so the setting was ignored. It is now written as `retryMaxWait`, which Datastar 1.0.4 reads.
 
 **`ContentType = CustomJson obj`.** It used to send an option called `override`, which Datastar does not have, so Datastar ignored it and sent the signals as usual.
 It now sends your object as the request body. If your server code expects the signals, change it to expect your object, or stop using `CustomJson`.
 
+**`OpenWhenHidden = ValueSome true`** is written as the JSON boolean `true`. It used to be written as the text `"true"`.
+
+**`FilterSignals`, `AbortController` and `Headers`.** `FilterSignals` with any pattern used to raise `JsonReaderException`, because the filter text is not JSON. It is now sent as `{"filterSignals":{"include":"^foo"}}`.
+A filter that has an exclude but no include keeps Datastar's rule that signals whose names start with an underscore stay in the browser, which Datastar would otherwise drop when it is given an exclude of its own.
+`AbortController "$controller"` used to be sent as the text `"$controller"`, which Datastar ignores. It is now sent as the signal `$controller`. A header name that is given twice, a `RetryScaler` that is not a number, and an `AbortController` without a name raise an `ArgumentException` that says what to write.
+
+**Signals filters.** `SignalsFilter.Serialize` now returns text that is ready for an attribute, so if you put its result in an attribute yourself, do not encode it again. `SignalsFilter.Include`, `Exclude` and `Prefix` patterns are regular expressions without the slashes around them. The library escapes a slash and a line break inside the pattern, and encodes the pattern for the attribute.
+`Ds.onSignalPatchFilter` and `Ds.jsonSignalsOptions` used to write the pattern as it was, so a quote in it ended the attribute. A pattern that you wrote with slashes around it, such as `"/foo/"`, is now a pattern for the text `/foo/`. Remove the slashes.
+
+**`Ds.safariStreamingFix`** wrote `data-on:pageshow.window`. Datastar 1.0.4 reads modifiers after `__`, so that attribute listened for an event called `pageshow.window` and never ran. It now writes `data-on:pageshow__window`.
+
+**Expressions built with `Expr.unsafeRaw` and `Stmt.unsafeRaw`** are escaped for the attribute, and `Expr.unsafeRaw` puts text that is more than a name in parentheses. `Expr.divide` on whole numbers cuts the result to a whole number.
+
 **`Ds.cdnSrc` and `Ds.cdnScript`.** They now load Datastar 1.0.4. They loaded 1.0.0-RC.7 before, so your pages move across several Datastar releases.
 The changes in Datastar that can affect your pages are listed under [Changes in Datastar itself](#changes-in-datastar-itself), and the full list is in the [Datastar release notes](https://github.com/starfederation/datastar/releases).
-To stay on the old script for now, write the tag yourself. Note that `Ds.query`, `RequestCancellation = Cleanup` and `RequestOptions.RetryMaxWait` need the newer script.
+To stay on the old script for now, write the tag yourself. Note that some things need the newer script: `Ds.bindProp`, `Ds.bindEvent` and `OnEventModifier.Document` need 1.0.0, `Ds.nonce` needs 1.0.3, and the Rocket helpers need the 1.0.4 bundle. `Ds.query`, `RequestCancellation = Cleanup` and `RequestOptions.RetryMaxWait` need a script newer than RC.7 too.
 
 ```fsharp
 Elem.script [ Attr.type' "module"; Attr.src "https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0-RC.7/bundles/datastar.js" ] []
 ```
+
+#### Names that are refused
+
+Some names used to be accepted and never worked. They now raise an `ArgumentException` that says what to write.
+
+- A name that goes into an attribute name, such as the class in `Ds.class'`, the event in `Ds.onEvent`, the attribute in `Ds.attr'`, the property in `Ds.style`, a Rocket prop name, and the events of `Ds.bindEvent`: it cannot be empty, contain whitespace, a quote, `=`, `/`, `<` or `>`, or contain a double underscore. Datastar reads `__` as the start of a modifier, so `Ds.class' ("card__title", ...)` toggled a class called `card`.
+- A typed signal name, from `Signal.browser`, `Signal.server`, `Signal.rocket` and `Signal.tryCreate`: a part cannot start with a capital letter, end with an underscore, or have two underscores in a row. HTML makes attribute names lower case, so `Signal.server<int> "Menu"` was declared as `menu` and read as `$Menu`.
+- `Rocket.forEach` needs item and index names that are JavaScript identifiers, and `Stmt.all` needs at least one statement.
+
+`Signal.tryCreate` returns a `SignalNameError` instead of text. `RocketManifest.parse` and `Request.getRocketManifests` return a `RocketManifestError`.
+`SignalScope`, `SignalNameError` and `RocketManifestError` are `RequireQualifiedAccess`, so their cases do not clash with your names.
 
 #### Changes to your dependencies
 

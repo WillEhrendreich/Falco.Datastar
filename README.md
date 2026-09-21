@@ -604,6 +604,7 @@ Elem.pre [ Ds.jsonSignalsOptions (SignalsFilter.Include "/foo/") ] []
 [Rocket](https://github.com/starfederation/datastar/tree/v1.0.4/library/src/rocket) is Datastar's way of writing web components.
 You write a component in JavaScript with `rocket(tag, { props, setup, render })`, and the server renders the component's tag, its props and its children.
 Load Datastar with `Ds.rocketCdnScript` to use it. The helpers below write only the values you pass, so Rocket's own defaults still apply.
+Datastar's [Rocket reference](https://data-star.dev/reference/rocket) says that Rocket is in beta and that its API is subject to change, so these helpers may need to change with it.
 
 The [RocketComponents example](examples/RocketComponents) is a small app that uses everything described here.
 
@@ -646,6 +647,7 @@ let handleChange : HttpHandler = fun ctx ->
 ### `Rocket.local | Rocket.call | Rocket.root`
 
 The children of a light-DOM component (`mode: 'light'`), and the component's own render output, can use signals and actions that belong to one instance of the component.
+In an open shadow-DOM component, `Rocket.local` and `Rocket.root` also work in the children that the server rendered.
 Rocket rewrites `$$name` into a path that is unique to that instance, so two instances do not share it. It rewrites `@name(...)` into a call to the action registered with `action('name', fn)` in the component's `setup`, or, if there is none, into a call to the Datastar action with that name.
 
 ```fsharp
@@ -669,6 +671,10 @@ Rocket adds directives that go on `<template>` elements. [`data-for`](https://gi
 [`data-if`, `data-else-if` and `data-else`](https://github.com/starfederation/datastar/blob/v1.0.4/library/src/rocket/conditional.ts) render one branch of a chain.
 Rocket calls the item `item` and the index `i` unless you give other names. It always looks for the attributes `data-for`, `data-if`, `data-else-if` and `data-else`, even if you set a different attribute prefix.
 
+Rocket runs these directives on the server-rendered children of a light-DOM component when the page loads.
+In an open or closed shadow-DOM component it does not: the `<template>` elements stay inert until a later server patch sends new children for the component, and then they run.
+For a shadow-DOM component, put the directives in its `render` function in JavaScript, or use `mode: 'light'`.
+
 ```fsharp
 Elem.ul [] [
     Rocket.templateFor (Rocket.local "log", [ Elem.li [ Ds.text "n + ': ' + entry" ] [] ], item = "entry", index = "n")
@@ -677,6 +683,34 @@ Elem.ul [] [
 Rocket.templateIf ("$$count >= 10", [ Text.raw "That is a lot." ])
 Rocket.templateElse [ Text.raw "Keep going." ]
 ```
+
+### `Request.getRocketManifests`
+
+A page can post the description of every Rocket component it defines to your server, for example to build documentation or a component registry. In JavaScript:
+
+```js
+import { publishRocketManifests } from '/path/to/datastar-rocket.js'
+await publishRocketManifests({ endpoint: '/api/rocket/manifests' })
+```
+
+`Request.getRocketManifests` reads that request into a `RocketManifestDocument`. It holds the components, and for each one its props (with their codec, default value, allowed values and documentation), slots and events.
+`RocketManifest.parse` does the same for a string.
+
+```fsharp
+let handleManifests : HttpHandler = fun ctx -> task {
+    match! Request.getRocketManifests ctx with
+    | Ok manifest ->
+        for info in manifest.Components do
+            printfn "%s has %d props" info.Tag info.Props.Length
+        return Response.ofEmpty ctx
+    | Error message ->
+        return (Response.withStatusCode 400 >> Response.ofPlainText message) ctx
+}
+```
+
+It returns an error message when the body is not JSON, when a required property is missing, or when the document has a version other than 1.
+A codec name that this library does not know is kept as `RocketPropType.Other`, so a newer Rocket does not break it.
+This reads the manifest only. Generating F# code from it is left to a separate tool.
 
 ## _When to `$`_
 

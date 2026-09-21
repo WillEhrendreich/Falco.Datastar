@@ -10,6 +10,7 @@ open Falco.Markup
 /// Components are written in JavaScript with <c>rocket(tag, definition)</c>. These helpers cover what the server renders:
 /// the props a component reads from its attributes, the signals and actions its children can use, and its template directives.
 /// They only write the values you pass, so Rocket's own defaults still apply.
+/// Datastar's documentation says that Rocket is in beta and that its API is subject to change: https://data-star.dev/reference/rocket
 /// https://github.com/starfederation/datastar/tree/v1.0.4/library/src/rocket
 /// </summary>
 [<AbstractClass; Sealed; RequireQualifiedAccess>]
@@ -109,6 +110,7 @@ type Rocket =
     /// Repeats the children once for each item in a signal or expression, e.g. <c>Rocket.templateFor (Rocket.local "todos", [ ... ], item = "todo")</c>.
     /// Rocket calls the item <c>item</c> and the index <c>i</c> unless you give other names, and this method only writes names you pass.
     /// The attribute is always <c>data-for</c>, even if you set a different attribute prefix, because Rocket does not support a prefix on its template directives.
+    /// Rocket runs the directive on the server-rendered children of a light-DOM component when the page loads. In an open or closed shadow-DOM component it only runs for children that a later server patch sends.
     /// </summary>
     /// <param name="source">An expression that gives an array, an iterable or a string</param>
     /// <param name="children">The content of one row. It can use the item and the index by their names</param>
@@ -127,6 +129,7 @@ type Rocket =
     /// <summary>
     /// Renders the children only while the condition is true. To make a chain, put <see cref="templateElseIf"/> and <see cref="templateElse"/> elements directly after it.
     /// The attribute is always <c>data-if</c>, even if you set a different attribute prefix, because Rocket does not support a prefix on its template directives.
+    /// Rocket runs the directive on the server-rendered children of a light-DOM component when the page loads. In an open or closed shadow-DOM component it only runs for children that a later server patch sends.
     /// </summary>
     /// <param name="condition">An expression</param>
     /// <param name="children">The content to render</param>

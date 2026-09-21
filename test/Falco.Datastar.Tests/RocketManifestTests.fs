@@ -99,9 +99,12 @@ module RocketManifestTests =
         events |> List.map (fun e -> e.Description) |> should equal [ ValueSome "Dismiss."; ValueNone ]
 
     [<Fact>]
-    let ``RocketManifest.parse says which version it reads when it gets another one`` () =
-        RocketManifest.parse """{"version":2,"generatedAt":"2026-01-01T00:00:00.000Z","components":[]}"""
-        |> should equal (Error "This library reads Rocket manifest version 1, but the document is version 2" : Result<RocketManifestDocument, string>)
+    let ``RocketManifest.parse says which version it reads, and what to do, when it gets another one`` () =
+        match RocketManifest.parse """{"version":2,"generatedAt":"2026-01-01T00:00:00.000Z","components":[]}""" with
+        | Error message ->
+            message |> should haveSubstring "reads Rocket manifest version 1, but the document is version 2"
+            message |> should haveSubstring "Update Falco.Datastar"
+        | Ok _ -> failwith "expected an error"
 
     [<Fact>]
     let ``RocketManifest.parse returns an error for text that is not JSON`` () =
@@ -123,3 +126,38 @@ module RocketManifestTests =
         match (Request.getRocketManifests ctx).GetAwaiter().GetResult() with
         | Ok document -> document.Components |> List.length |> should equal 2
         | Error message -> failwith message
+
+    let private wrap (component':string) =
+        $"""{{"version":1,"generatedAt":"2026-01-01T00:00:00.000Z","components":[{component'}]}}"""
+
+    [<Fact>]
+    let ``RocketManifest.parse returns an error, and does not throw, when components is not a list`` () =
+        match RocketManifest.parse """{"version":1,"generatedAt":"2026-01-01T00:00:00.000Z","components":5}""" with
+        | Error message -> message |> should haveSubstring "components"
+        | Ok _ -> failwith "expected an error"
+
+    [<Fact>]
+    let ``RocketManifest.parse names the prop and the component when a prop property is missing`` () =
+        match RocketManifest.parse (wrap """{"tag":"my-card","props":[{"name":"count","type":"number","default":0}]}""") with
+        | Error message ->
+            message |> should haveSubstring "attribute"
+            message |> should haveSubstring "count"
+            message |> should haveSubstring "my-card"
+        | Ok _ -> failwith "expected an error"
+
+    [<Fact>]
+    let ``RocketManifest.parse gives the position of a prop that has no name`` () =
+        match RocketManifest.parse (wrap """{"tag":"my-card","props":[{"name":"a","attribute":"a","type":"string","default":""},{"attribute":"b","type":"string","default":""}]}""") with
+        | Error message ->
+            message |> should haveSubstring "prop 2"
+            message |> should haveSubstring "my-card"
+        | Ok _ -> failwith "expected an error"
+
+    [<Fact>]
+    let ``Request.getRocketManifests refuses a body that is larger than one mebibyte`` () =
+        let ctx = DefaultHttpContext()
+        ctx.Request.Method <- "POST"
+        ctx.Request.Body <- new MemoryStream(Encoding.UTF8.GetBytes (String('x', 1024 * 1024 + 1)))
+        match (Request.getRocketManifests ctx).GetAwaiter().GetResult() with
+        | Error message -> message |> should haveSubstring "larger than"
+        | Ok _ -> failwith "expected an error"

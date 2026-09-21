@@ -208,14 +208,14 @@ module RocketManifest =
     let private required (name:string) (context:string) (element:JsonElement) =
         match property name element with
         | ValueSome value -> Ok value
-        | ValueNone -> Error $"The manifest has no {name} in {context}"
+        | ValueNone -> Error $"The manifest has no \"{name}\" in {context}"
 
     let private text (name:string) (context:string) (element:JsonElement) =
         required name context element
         |> Result.bind (fun value ->
             match value.ValueKind with
             | JsonValueKind.String -> Ok (value.GetString())
-            | _ -> Error $"The {name} in {context} is not text")
+            | _ -> Error $"The \"{name}\" in {context} is not text")
 
     let private optionalText (name:string) (element:JsonElement) =
         match property name element with
@@ -233,10 +233,18 @@ module RocketManifest =
         | ValueSome value when value.ValueKind = JsonValueKind.Array -> value.EnumerateArray() |> List.ofSeq
         | _ -> []
 
-    let private readAll (read:JsonElement -> Result<'T, string>) (elements:JsonElement list) =
+    /// Reads every element and stops at the first error. The reader is given the position of the element, counting from 1, to say where an error is.
+    let private readAll (read:int -> JsonElement -> Result<'T, string>) (elements:JsonElement list) =
         elements
-        |> List.fold (fun collected element -> collected |> Result.bind (fun readSoFar -> read element |> Result.map (fun item -> item :: readSoFar))) (Ok [])
+        |> List.indexed
+        |> List.fold (fun collected (index, element) -> collected |> Result.bind (fun readSoFar -> read (index + 1) element |> Result.map (fun item -> item :: readSoFar))) (Ok [])
         |> Result.map List.rev
+
+    /// Says which entry an error is about: by its name when it has one, and by its position when it does not.
+    let private describe (kind:string) (owner:string) (position:int) (element:JsonElement) =
+        match optionalText "name" element with
+        | ValueSome name -> $"the {kind} \"{name}\" of {owner}"
+        | ValueNone -> $"{kind} {position} of {owner}"
 
     let private propType (name:string) =
         match name with
@@ -269,8 +277,8 @@ module RocketManifest =
                         Placeholder = optionalText "placeholder" docs }
         | _ -> ValueNone
 
-    let private readProp (tag:string) (element:JsonElement) =
-        let context = $"a prop of {tag}"
+    let private readProp (tag:string) (position:int) (element:JsonElement) =
+        let context = describe "prop" tag position element
         text "name" context element
         |> Result.bind (fun name ->
             text "attribute" context element
@@ -291,12 +299,12 @@ module RocketManifest =
                             | _ -> ValueNone
                           Docs = readDocs element }))))
 
-    let private readSlot (tag:string) (element:JsonElement) =
-        text "name" $"a slot of {tag}" element
+    let private readSlot (tag:string) (position:int) (element:JsonElement) =
+        text "name" (describe "slot" tag position element) element
         |> Result.map (fun name -> { Name = name; Description = optionalText "description" element })
 
-    let private readEvent (tag:string) (element:JsonElement) =
-        text "name" $"an event of {tag}" element
+    let private readEvent (tag:string) (position:int) (element:JsonElement) =
+        text "name" (describe "event" tag position element) element
         |> Result.map (fun name ->
             { Name = name
               Kind = optionalText "kind" element |> ValueOption.map eventKind |> ValueOption.defaultValue RocketEventKind.Event
@@ -304,8 +312,8 @@ module RocketManifest =
               Composed = optionalBool "composed" element
               Description = optionalText "description" element })
 
-    let private readComponent (element:JsonElement) =
-        text "tag" "a component" element
+    let private readComponent (position:int) (element:JsonElement) =
+        text "tag" $"component {position}" element
         |> Result.bind (fun tag ->
             readAll (readProp tag) (items "props" element)
             |> Result.bind (fun props ->
@@ -322,7 +330,7 @@ module RocketManifest =
             match version.ValueKind, version.TryGetInt32() with
             | JsonValueKind.Number, (true, number) when number = supportedVersion -> Ok number
             | JsonValueKind.Number, (true, number) ->
-                Error $"This library reads Rocket manifest version {supportedVersion}, but the document is version {number}"
+                Error $"This library reads Rocket manifest version {supportedVersion}, but the document is version {number}. Update Falco.Datastar to a version that reads it, or check that the page and this server use compatible versions of Datastar."
             | _ -> Error "The version in the manifest is not a number")
         |> Result.bind (fun version ->
             text "generatedAt" "the manifest" root
@@ -332,7 +340,10 @@ module RocketManifest =
                 | false, _ -> Error "The generatedAt in the manifest is not a date")
             |> Result.bind (fun generatedAt ->
                 required "components" "the manifest" root
-                |> Result.bind (fun components -> readAll readComponent (components.EnumerateArray() |> List.ofSeq))
+                |> Result.bind (fun components ->
+                    match components.ValueKind with
+                    | JsonValueKind.Array -> readAll readComponent (components.EnumerateArray() |> List.ofSeq)
+                    | _ -> Error "The \"components\" in the manifest is not a list")
                 |> Result.map (fun components -> { Version = version; GeneratedAt = generatedAt; Components = components })))
 
     /// <summary>

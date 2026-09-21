@@ -1,6 +1,7 @@
 [<RequireQualifiedAccess>]
 module Falco.Datastar.Request
 
+open System
 open System.IO
 open System.Text.Json
 open Microsoft.AspNetCore.Http
@@ -28,14 +29,28 @@ let getSignalsOptions<'T> (jsonSerializerOptions:JsonSerializerOptions) (ctx:Htt
 let getSignalsJson (ctx:HttpContext) =
     JsonDocument.ParseAsync (ServerSentEventGenerator.GetSignalsStream(ctx.Request), JsonDocumentOptions(), ctx.RequestAborted)
 
+/// The largest manifest body that getRocketManifests reads. The manifest of a whole page is far smaller than this.
+let private maxManifestBytes = 1024 * 1024
+
 /// <summary>
-/// Read the manifest that Rocket's publishRocketManifests posts to your server. It returns an error message when the body is not a manifest this library can read.
+/// Read the manifest that Rocket's publishRocketManifests posts to your server. It returns an error message when the body is not a manifest this library can read,
+/// or when it is larger than 1 MiB, in which case the rest of the body is not read.
 /// Can only call this once per request
 /// </summary>
 /// <param name="ctx">HttpContext</param>
 let getRocketManifests (ctx:HttpContext) =
     task {
-        use reader = new StreamReader(ctx.Request.Body)
-        let! body = reader.ReadToEndAsync(ctx.RequestAborted)
-        return RocketManifest.parse body
+        use body = new MemoryStream()
+        let chunk : byte array = Array.zeroCreate 8192
+        let mutable finished = false
+        while not finished && body.Length <= int64 maxManifestBytes do
+            let! count = ctx.Request.Body.ReadAsync(Memory<byte>(chunk), ctx.RequestAborted)
+            match count with
+            | 0 -> finished <- true
+            | count -> body.Write(chunk, 0, count)
+        match body.Length > int64 maxManifestBytes with
+        | true ->
+            return Error "The manifest is larger than 1 MiB, so it was not read. The manifest of a page is far smaller than that. Check what is posting to this endpoint."
+        | false ->
+            return RocketManifest.parse (System.Text.Encoding.UTF8.GetString(body.GetBuffer(), 0, int body.Length))
     }

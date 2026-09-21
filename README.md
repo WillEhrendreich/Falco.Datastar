@@ -833,7 +833,7 @@ let handleManifests : HttpHandler = fun ctx -> task {
 }
 ```
 
-It returns an error message when the body is not JSON, when a required property is missing, or when the document has a version other than 1.
+It returns an error message when the body is not JSON, when a required property is missing, or when the document has a version other than 1. The message names the component and the prop it is about. `Request.getRocketManifests` also refuses a body larger than 1 MiB without reading the rest of it.
 A codec name that this library does not know is kept as `RocketPropType.Other`, so a newer Rocket does not break it.
 This reads the manifest only. Generating F# code from it is left to a separate tool.
 

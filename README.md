@@ -458,6 +458,14 @@ Elem.button [ Ds.onClick (Ds.get ("/endpoint",
                                  )) ] [ Text.raw "Push the Button" ]
 ```
 
+`OpenWhenHidden` controls what happens to a request while the page is hidden. When it is `false`, Datastar cancels the request as soon as the page is hidden and starts it again when the page is visible.
+When it is `true`, the request keeps running, which suits something like a dashboard.
+The option is not set unless you set it, so Datastar chooses: `false` for `@get`, and `true` for `@post`, `@put`, `@patch`, `@delete` and `@query`.
+Set `OpenWhenHidden = ValueSome false` to make a `@post` behave like a `@get` here, or `ValueSome true` to keep a `@get` running.
+
+Older versions of this library declared the option as `OpenWhenHidden: bool` with a default of `false`, but they never sent that default, so a `@post` used Datastar's `true` anyway.
+The type is now `bool voption`. Change `OpenWhenHidden = true` in your code to `OpenWhenHidden = ValueSome true`.
+
 These options are also available in Datastar 1.0.4:
 
 - `RequestCancellation = Cleanup` cancels the request when the element it is on is removed from the page.

@@ -122,7 +122,7 @@ They can be created and modified using data attributes on the frontend, or event
 Updating a signal value in an expression will cause other bindings and expressions to update elsewhere.
 
 Some important notes: Signals defined later in the DOM tree override those defined earlier.
-`data-*` attributes are [evaluated in the order they appear in the DOM](https://data-star.dev/examples/plugin_order); meaning that signals need to be specified before they can be used.
+`data-*` attributes are [evaluated in the order they appear in the DOM](https://data-star.dev/reference/attributes#attribute-evaluation-order); meaning that signals need to be specified before they can be used.
 
 #### Sections:
 
@@ -423,10 +423,10 @@ Elem.div [
 Datastar provides a number of actions and functions that can be used in [Datastar expressions](https://data-star.dev/guide/datastar_expressions)
 for making server requests and manipulating signals.
 
-### [@get | @post | @put | @patch | @delete | @query](https://data-star.dev/reference/actions#backend-plugins)
+### [@get | @post | @put | @patch | @delete | @query](https://data-star.dev/reference/actions#backend-actions)
 
 These actions make requests to any backend service that supports Server Side Events (SSE).
-Luckily an F#-friendly [SDK exists](https://data-star.dev/reference/sdks#dotnet) and `Falco.Datastar` has several [helper methods](#reading-signals-and-server-side-events)
+Luckily an F#-friendly [SDK exists](https://data-star.dev/reference/sdks#csharp) and `Falco.Datastar` has several [helper methods](#reading-signals-and-server-side-events)
 
 All signals, that do not have an underscore prefix, are sent in the request.
 `@get` and `@delete` send the signal values in the `datastar` query parameter. The other actions send them in a JSON body.
@@ -672,7 +672,7 @@ Elem.input [ Attr.typeCheckbox; Ds.bind (sp"checkBoxSignal") ]
 
 ## Reading Signals and Server Side Events
 
-[Falco.Datastar](https://github.com/falcoframework/Falco.Datastar) has a number of Request and Response functions for reading the [Datastar signal](https://data-star.dev/guide/going_deeper#2-signals) values and responding
+[Falco.Datastar](https://github.com/falcoframework/Falco.Datastar) has a number of Request and Response functions for reading the [Datastar signal](https://data-star.dev/guide/reactive_signals) values and responding
 with [Datastar Server Side Events (SSEs)](https://data-star.dev/reference/sse_events).
 
 Sections:
@@ -761,7 +761,7 @@ The following functions are `HttpHandler`s that will send down a single Server S
 Will render an XMLNode and send it to the client. Client Datastar will replace the element with the matching `id` attribute (or optionally provided selector)
 
 ```fsharp
-Response.ofHtml ( Elem.h2 [ Attr.id "hello" ] [ Text.raw "Hello, World from the Server!" ] )
+Response.ofHtmlElements ( Elem.h2 [ Attr.id "hello" ] [ Text.raw "Hello, World from the Server!" ] )
 ```
 
 ### `Response.ofHtmlStringElements`
@@ -777,7 +777,7 @@ Response.ofHtmlStringElements @"<h2 id='hello'>Hello, World from the Server!"
 Will send a command to client Datastar to remove fragments with the matching selector.
 
 ```fsharp
-Response.ofRemoveElements [ sel"hello" ]
+Response.ofRemoveElement (sel"#hello")   // needs: open Falco.Datastar.Selector
 ```
 
 ### Patch options

@@ -18,6 +18,8 @@ let demo =
 It provides a complete mapping of all [attribute plugins](https://data-star.dev/reference/attributes) and [action plugins](https://data-star.dev/reference/actions).
 As well as helpers for retrieving the signals and responding with Datastar Server Side Events.
 
+Upgrading from version 1.3.0 or earlier? See [Upgrading](#upgrading).
+
 ## Key Features
 - Idiomatic mapping of `data-*` attributes (e.g. `data-text`, `data-bind`, `data-signals`, etc.).
 - Helper functions for reading signals and responding with Datastar Server Side Events.
@@ -784,3 +786,63 @@ let handleStream = (fun ctx -> task {
 ```
 
 See the [Streaming example](examples/Streaming) for more.
+
+## Upgrading
+
+This section covers upgrading from version 1.3.0 or earlier. It lists what can stop your code compiling, what can produce warnings, and what changes the output without any compiler message.
+
+### Changes that stop your code compiling
+
+**`OpenWhenHidden` is now `bool voption`.** The compiler reports error FS0001. Wrap the value in `ValueSome`:
+
+```fsharp
+// before
+{ RequestOptions.Defaults with OpenWhenHidden = true }
+
+// after
+{ RequestOptions.Defaults with OpenWhenHidden = ValueSome true }
+```
+
+Take care with `OpenWhenHidden = false`. The old code never sent it, so `@post`, `@put`, `@patch` and `@delete` ignored it and kept running while the page was hidden, because that is Datastar's default for them.
+`ValueSome false` is sent, so those requests are now cancelled when the page is hidden and started again when it is visible.
+If you want the old behaviour, delete the line. On a `@get`, `ValueSome false` is the same as leaving it out.
+
+**`RequestOptions` has a new field, `ResponseOverrides`.** Code that starts from `RequestOptions.Defaults` and uses `with` needs no change.
+Code that lists every field of the record fails with error FS0764. Add `ResponseOverrides = ValueNone`, or start from `RequestOptions.Defaults` instead.
+
+### Changes that produce warnings
+
+Three types have a new case: `BackendAction.Query`, `RequestCancellation.Cleanup` and `OnEventModifier.Document`.
+A `match` that lists every case of one of these types now gets warning FS0025, which is an error if your project treats warnings as errors.
+Add a case for the new value, or a `_` case. Until you do, a value that reaches the `match` without a case raises `MatchFailureException`.
+
+### Name clashes
+
+`open Falco.Datastar` now brings `Query`, `Cleanup` and `Document` into scope as union cases.
+If your own code declares a union case with one of these names, and you open `Falco.Datastar` *after* that declaration, your name now means Falco's case. You get errors such as "expected to have type `Msg` but here has type `BackendAction`".
+Either move `open Falco.Datastar` above your type, or put the type name in front of the case:
+
+```fsharp
+match msg with
+| Msg.Query text -> text
+| Msg.Cleanup -> "cleaned up"
+```
+
+A module or type of your own called `Rocket` does not clash.
+
+### Changes that compile but produce different output
+
+**`Ds.setAll` and `Ds.toggleAll`.** They used to write `@setAll('foo.', true)` and `@toggleAll('foo.')`. The Datastar actions take the value first and a filter second (`@setAll(value, filter)`) and only a filter (`@toggleAll(filter)`), so the old output did not do what it looked like.
+They now write `@setAll(true, { include: /^foo\./ })` and `@toggleAll({ include: /^foo\./ })`. Your code needs no change, but tests that compare the generated text need new expected values.
+Numbers are now written as numbers: `Ds.setAll ("foo.", 5)` used to write `'5'`, which is text, and now writes `5`. If you want text, pass a string.
+
+**`ContentType = CustomJson obj`.** It used to send an option called `override`, which Datastar does not have, so Datastar ignored it and sent the signals as usual.
+It now sends your object as the request body. If your server code expects the signals, change it to expect your object, or stop using `CustomJson`.
+
+**`Ds.cdnSrc` and `Ds.cdnScript`.** They now load Datastar 1.0.4. They loaded 1.0.0-RC.7 before, so your pages move across several Datastar releases.
+This library does not list every change in Datastar itself. Read the [Datastar release notes](https://github.com/starfederation/datastar/releases) before you deploy.
+To stay on the old script for now, write the tag yourself. Note that `Ds.query` and `RequestCancellation = Cleanup` need the newer script.
+
+```fsharp
+Elem.script [ Attr.type' "module"; Attr.src "https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0-RC.7/bundles/datastar.js" ] []
+```

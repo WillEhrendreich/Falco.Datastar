@@ -150,3 +150,159 @@ type Rocket =
     /// <returns>Element</returns>
     static member templateElse (children:XmlNode list) =
         Elem.template [ Attr.createBool "data-else" ] children
+
+/// <summary>
+/// Reads the document that Rocket's <c>publishRocketManifests</c> posts to your server: one entry for every component the page defined,
+/// with its props (from their codecs), slots and events. A docs build or a component registry can store it.
+/// https://github.com/starfederation/datastar/blob/v1.0.4/library/src/rocket/runtime.ts
+/// </summary>
+[<RequireQualifiedAccess>]
+module RocketManifest =
+    let private property (name:string) (element:JsonElement) =
+        match element.ValueKind with
+        | JsonValueKind.Object ->
+            match element.TryGetProperty name with
+            | true, value -> ValueSome value
+            | false, _ -> ValueNone
+        | _ -> ValueNone
+
+    let private required (name:string) (context:string) (element:JsonElement) =
+        match property name element with
+        | ValueSome value -> Ok value
+        | ValueNone -> Error $"The manifest has no {name} in {context}"
+
+    let private text (name:string) (context:string) (element:JsonElement) =
+        required name context element
+        |> Result.bind (fun value ->
+            match value.ValueKind with
+            | JsonValueKind.String -> Ok (value.GetString())
+            | _ -> Error $"The {name} in {context} is not text")
+
+    let private optionalText (name:string) (element:JsonElement) =
+        match property name element with
+        | ValueSome value when value.ValueKind = JsonValueKind.String -> ValueSome (value.GetString())
+        | _ -> ValueNone
+
+    let private optionalBool (name:string) (element:JsonElement) =
+        match property name element with
+        | ValueSome value when value.ValueKind = JsonValueKind.True -> ValueSome true
+        | ValueSome value when value.ValueKind = JsonValueKind.False -> ValueSome false
+        | _ -> ValueNone
+
+    let private items (name:string) (element:JsonElement) =
+        match property name element with
+        | ValueSome value when value.ValueKind = JsonValueKind.Array -> value.EnumerateArray() |> List.ofSeq
+        | _ -> []
+
+    let private readAll (read:JsonElement -> Result<'T, string>) (elements:JsonElement list) =
+        elements
+        |> List.fold (fun collected element -> collected |> Result.bind (fun readSoFar -> read element |> Result.map (fun item -> item :: readSoFar))) (Ok [])
+        |> Result.map List.rev
+
+    let private propType (name:string) =
+        match name with
+        | "string" -> RocketPropType.String
+        | "number" -> RocketPropType.Number
+        | "boolean" -> RocketPropType.Boolean
+        | "date" -> RocketPropType.Date
+        | "json" -> RocketPropType.Json
+        | "js" -> RocketPropType.Js
+        | "binary" -> RocketPropType.Binary
+        | "array" -> RocketPropType.Array
+        | "tuple" -> RocketPropType.Tuple
+        | "object" -> RocketPropType.Object
+        | "oneOf" -> RocketPropType.OneOf
+        | "custom" -> RocketPropType.Custom
+        | other -> RocketPropType.Other other
+
+    let private eventKind (name:string) =
+        match name with
+        | "event" -> RocketEventKind.Event
+        | "custom-event" -> RocketEventKind.CustomEvent
+        | other -> RocketEventKind.Other other
+
+    let private readDocs (element:JsonElement) =
+        match property "docs" element with
+        | ValueSome docs when docs.ValueKind = JsonValueKind.Object ->
+            ValueSome { Description = optionalText "description" docs
+                        Label = optionalText "label" docs
+                        Control = optionalText "control" docs
+                        Placeholder = optionalText "placeholder" docs }
+        | _ -> ValueNone
+
+    let private readProp (tag:string) (element:JsonElement) =
+        let context = $"a prop of {tag}"
+        text "name" context element
+        |> Result.bind (fun name ->
+            text "attribute" context element
+            |> Result.bind (fun attribute ->
+                text "type" context element
+                |> Result.bind (fun typeName ->
+                    required "default" context element
+                    |> Result.map (fun defaultValue ->
+                        { Name = name
+                          Attribute = attribute
+                          Type = propType typeName
+                          Default = defaultValue.Clone()
+                          Required = optionalBool "required" element |> ValueOption.defaultValue false
+                          Values =
+                            match property "values" element with
+                            | ValueSome values when values.ValueKind = JsonValueKind.Array ->
+                                ValueSome (values.EnumerateArray() |> Seq.map (fun value -> value.Clone()) |> List.ofSeq)
+                            | _ -> ValueNone
+                          Docs = readDocs element }))))
+
+    let private readSlot (tag:string) (element:JsonElement) =
+        text "name" $"a slot of {tag}" element
+        |> Result.map (fun name -> { Name = name; Description = optionalText "description" element })
+
+    let private readEvent (tag:string) (element:JsonElement) =
+        text "name" $"an event of {tag}" element
+        |> Result.map (fun name ->
+            { Name = name
+              Kind = optionalText "kind" element |> ValueOption.map eventKind |> ValueOption.defaultValue RocketEventKind.Event
+              Bubbles = optionalBool "bubbles" element
+              Composed = optionalBool "composed" element
+              Description = optionalText "description" element })
+
+    let private readComponent (element:JsonElement) =
+        text "tag" "a component" element
+        |> Result.bind (fun tag ->
+            readAll (readProp tag) (items "props" element)
+            |> Result.bind (fun props ->
+                readAll (readSlot tag) (items "slots" element)
+                |> Result.bind (fun slots ->
+                    readAll (readEvent tag) (items "events" element)
+                    |> Result.map (fun events -> { Tag = tag; Props = props; Slots = slots; Events = events }))))
+
+    let private supportedVersion = 1
+
+    let private readDocument (root:JsonElement) =
+        required "version" "the manifest" root
+        |> Result.bind (fun version ->
+            match version.ValueKind, version.TryGetInt32() with
+            | JsonValueKind.Number, (true, number) when number = supportedVersion -> Ok number
+            | JsonValueKind.Number, (true, number) ->
+                Error $"This library reads Rocket manifest version {supportedVersion}, but the document is version {number}"
+            | _ -> Error "The version in the manifest is not a number")
+        |> Result.bind (fun version ->
+            text "generatedAt" "the manifest" root
+            |> Result.bind (fun generatedAt ->
+                match DateTimeOffset.TryParse(generatedAt, CultureInfo.InvariantCulture, DateTimeStyles.None) with
+                | true, moment -> Ok moment
+                | false, _ -> Error "The generatedAt in the manifest is not a date")
+            |> Result.bind (fun generatedAt ->
+                required "components" "the manifest" root
+                |> Result.bind (fun components -> readAll readComponent (components.EnumerateArray() |> List.ofSeq))
+                |> Result.map (fun components -> { Version = version; GeneratedAt = generatedAt; Components = components })))
+
+    /// <summary>
+    /// Reads the JSON that <c>publishRocketManifests</c> posted. It returns an error message when the text is not JSON,
+    /// when a required property is missing, or when the document has a version other than 1.
+    /// </summary>
+    /// <param name="json">The body of the request</param>
+    let parse (json:string) : Result<RocketManifestDocument, string> =
+        try
+            use document = JsonDocument.Parse json
+            readDocument document.RootElement
+        with :? JsonException as error -> Error $"The manifest is not valid JSON: {error.Message}"

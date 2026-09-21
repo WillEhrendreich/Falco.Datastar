@@ -11,6 +11,7 @@
     <Compile Include="DsTests.fs" />
     <Compile Include="RocketTests.fs" />
     <Compile Include="RequestTests.fs" />
+    <Compile Include="RocketManifestTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 

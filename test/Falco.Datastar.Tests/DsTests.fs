@@ -176,6 +176,32 @@ module DsTests =
         Ds.post ("/x", { RequestOptions.Defaults with ContentType = CustomJson {| a = 1 |} })
         |> should equal """@post('/x',{&quot;contentType&quot;:&quot;json&quot;,&quot;payload&quot;:{&quot;a&quot;:1}})"""
 
+    // Retry options: the names are the ones Datastar 1.0.4 reads (createHttpMethod in fetch.ts).
+    // RC.8 and earlier read retryMaxWaitMs; since 1.0.0 the name is retryMaxWait.
+
+    [<Fact>]
+    let ``RequestOptions RetryMaxWait is sent as retryMaxWait`` () =
+        Ds.get ("/x", { RequestOptions.Defaults with RetryMaxWait = System.TimeSpan.FromSeconds 5.0 })
+        |> should equal """@get('/x',{&quot;retryMaxWait&quot;:5000})"""
+
+    [<Fact>]
+    let ``RequestOptions Retry is sent when it is not the default`` () =
+        Ds.get ("/x", { RequestOptions.Defaults with Retry = OnError })
+        |> should equal """@get('/x',{&quot;retry&quot;:&quot;error&quot;})"""
+        Ds.get ("/x", { RequestOptions.Defaults with Retry = OnAlways })
+        |> should equal """@get('/x',{&quot;retry&quot;:&quot;always&quot;})"""
+        Ds.get ("/x", { RequestOptions.Defaults with Retry = OnNever })
+        |> should equal """@get('/x',{&quot;retry&quot;:&quot;never&quot;})"""
+
+    [<Fact>]
+    let ``RequestOptions retry interval, scaler and count keep their names`` () =
+        Ds.get ("/x", { RequestOptions.Defaults with RetryInterval = System.TimeSpan.FromMilliseconds 250.0 })
+        |> should equal """@get('/x',{&quot;retryInterval&quot;:250})"""
+        Ds.get ("/x", { RequestOptions.Defaults with RetryScaler = 3.0 })
+        |> should equal """@get('/x',{&quot;retryScaler&quot;:3})"""
+        Ds.get ("/x", { RequestOptions.Defaults with RetryMaxCount = 4 })
+        |> should equal """@get('/x',{&quot;retryMaxCount&quot;:4})"""
+
     [<Fact>]
     let ``RequestOptions Defaults write no options, so Datastar's defaults apply`` () =
         Ds.get ("/x", RequestOptions.Defaults)

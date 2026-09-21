@@ -109,6 +109,13 @@ type Retry =
     | OnAlways
     /// disables retry
     | OnNever
+    with
+    static member Serialize (retry:Retry) =
+        match retry with
+        | OnAuto -> "auto"
+        | OnError -> "error"
+        | OnAlways -> "always"
+        | OnNever -> "never"
 
 type RequestCancellation =
     /// cancels existing requests on the same element; default
@@ -262,6 +269,9 @@ type RequestOptions = {
         backendActionOptions.OpenWhenHidden
         |> ValueOption.iter (fun openWhenHidden -> jsonObject.Add("openWhenHidden", JsonValue.Create openWhenHidden))
 
+        if backendActionOptions.Retry <> RequestOptions.Defaults.Retry then
+            jsonObject.Add("retry", Retry.Serialize backendActionOptions.Retry)
+
         if backendActionOptions.RetryInterval <> RequestOptions.Defaults.RetryInterval then
             jsonObject.Add("retryInterval", backendActionOptions.RetryInterval.TotalMilliseconds)
 
@@ -269,7 +279,7 @@ type RequestOptions = {
             jsonObject.Add("retryScaler", backendActionOptions.RetryScaler)
 
         if backendActionOptions.RetryMaxWait <> RequestOptions.Defaults.RetryMaxWait then
-            jsonObject.Add("retryMaxWaitMs", backendActionOptions.RetryMaxWait.TotalMilliseconds)
+            jsonObject.Add("retryMaxWait", backendActionOptions.RetryMaxWait.TotalMilliseconds)
 
         if backendActionOptions.RetryMaxCount <> RequestOptions.Defaults.RetryMaxCount then
             jsonObject.Add("retryMaxCount", backendActionOptions.RetryMaxCount)

@@ -226,6 +226,26 @@ The previous example uses a couple functions we haven't covered yet. [`Ds.onClic
 [`Ds.attr'`](#dsattr--data-attr) and [`Ds.show`](#dsshow--data-show) are evaluating the Datastar expression `$fetching` and are assigning `disabled` attribute and
 show/hiding the div, respectively, based on the `fetching` signal value's "true-ness".
 
+### [Ds.withCase : `__case`](https://data-star.dev/reference/attributes#data-signals)
+
+Datastar reads the name that some attributes create from the attribute's key, and the HTML parser lowercases attribute names.
+Because of that, a signal gets a camelCase name, and a class name or an event name gets a kebab-case name.
+`Ds.withCase` adds Datastar's `__case` modifier to change that. The styles are `CaseStyle.Camel`, `Kebab`, `Snake` and `Pascal`.
+Use it when your server uses another style, such as `snake_case` JSON.
+
+```fsharp
+Elem.div [ Ds.signal (sp"myValue", 1) |> Ds.withCase CaseStyle.Snake ] []                   // creates $my_value
+Elem.div [ Ds.onEvent ("my-event", "$seen = true") |> Ds.withCase CaseStyle.Camel ] []     // listens for myEvent
+```
+
+```html
+<div data-signals:my-value__case.snake="1"></div>
+<div data-on:my-event__case.camel="$seen = true"></div>
+```
+
+It works on `Ds.bind`, `Ds.class'`, `Ds.computed`, `Ds.indicator`, `Ds.onEvent` and `Ds.signal`.
+It does nothing on `Ds.ref` and `Ds.signals`, which put the name or the object in the attribute's value and not in its key.
+
 ## _Signal Binding_
 
 Binding to a signal means tying an attribute or value of an element to a value that can be modified by another effect.
@@ -518,14 +538,16 @@ Evaluates an expression without subscribing to the signals it reads. Use it in `
 Elem.div [ Ds.effect $"""$last = {Ds.peek "$count"}""" ] []
 ```
 
-### [Ds.nonce : `data-nonce`](https://github.com/starfederation/datastar/blob/v1.0.4/library/src/engine/csp.ts)
+### [Ds.nonce : `data-nonce`](https://data-star.dev/reference/security#csp-mode)
 
 Datastar runs the expressions in your `data-*` attributes with `Function`, which a Content Security Policy blocks unless the policy allows `unsafe-eval`.
-If your policy uses a nonce instead, put `Ds.nonce` on the `<html>` element. Datastar then runs its expressions through script tags that carry the nonce.
+If your policy uses a nonce instead, put `Ds.nonce` on the `<html>` element. This is Datastar's [CSP mode](https://data-star.dev/reference/security#csp-mode): it runs its expressions through script tags that carry the nonce.
 Without it, a page under such a policy fails with `EvalError: Evaluating a string as JavaScript violates the following Content Security Policy directive`.
 
-Use the same nonce in three places: your policy's `script-src`, the script tag that loads Datastar, and `Ds.nonce`.
-The nonce must not be empty, and it should be new for every response. Datastar reads the attribute once and then removes it from the page.
+The nonce must match the one in your policy's `script-src`. It must not be empty, and it should be a new random value for every full-page response.
+Datastar reads the attribute once and then removes it from the page.
+The script tag that loads Datastar needs the nonce too, unless your policy already allows its source, for example with `'self'`.
+Datastar also applies the nonce to scripts that arrive in element patches and JavaScript responses, so those responses do not need to carry it.
 
 ```fsharp
 let nonce = "..." // a new random value for each response
@@ -536,6 +558,11 @@ Elem.html [ Ds.nonce nonce ] [
     Elem.body [] [ (* ... *) ]
 ]
 ```
+
+CSP mode does not make Datastar expressions safe to use with untrusted content, because Datastar does not check or clean the expressions in your attributes.
+Pass user values through signals and not into the text of an expression, and sanitize any HTML that users can provide.
+Datastar also works with Trusted Types: it creates a policy named `datastar`, so a policy with `trusted-types datastar; require-trusted-types-for 'script'` allows it.
+If you use an aliased Datastar script, the attribute carries the alias too, for example `data-star-nonce`. Setting `Constants.dataSlugPrefix <- "data-star"` makes `Ds.nonce` write that name.
 
 ### [Ds.ignore | Ds.ignoreSelf | Ds.ignoreMorph : `data-ignore`](https://data-star.dev/reference/attributes#data-ignore)
 

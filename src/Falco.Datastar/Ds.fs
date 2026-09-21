@@ -548,8 +548,9 @@ type Ds =
     /// <summary>
     /// Gives Datastar the nonce of your Content Security Policy, so that it works on a page whose policy does not allow unsafe-eval.
     /// Put it on the &lt;html&gt; element. Datastar reads it once and then removes the attribute.
-    /// Use the same nonce in your policy's script-src, on the script tag that loads Datastar, and here. The nonce must not be empty.
-    /// https://github.com/starfederation/datastar/blob/v1.0.4/library/src/engine/csp.ts
+    /// The nonce must match the one in your policy's script-src, and it must not be empty. The script tag that loads Datastar needs it too, unless your policy already allows that source.
+    /// CSP mode does not make expressions safe to use with untrusted content: pass user values through signals, not into the text of an expression.
+    /// https://data-star.dev/reference/security#csp-mode
     /// </summary>
     /// <param name="nonce">The nonce for this response. Generate a new one for every response</param>
     /// <returns>Attribute</returns>

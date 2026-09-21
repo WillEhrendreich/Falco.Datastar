@@ -156,16 +156,31 @@ type ResponseOverrideMode =
         | Before -> "before"
         | After -> "after"
 
+/// The namespace in which the elements of a patch are created. Write it with its type name, e.g. ResponseOverrideNamespace.Svg
+[<RequireQualifiedAccess>]
+type ResponseOverrideNamespace =
+    | Html
+    | Svg
+    | MathMl
+    with
+    static member Serialize (elementNamespace:ResponseOverrideNamespace) =
+        match elementNamespace with
+        | ResponseOverrideNamespace.Html -> "html"
+        | ResponseOverrideNamespace.Svg -> "svg"
+        | ResponseOverrideNamespace.MathMl -> "mathml"
+
 /// Values that replace what the server sent in a patch-elements event
 type ElementsOverrides =
     { /// CSS selector of the element to patch, instead of the one the server named
       Selector: string voption
       /// How to patch, instead of the mode the server named
       Mode: ResponseOverrideMode voption
+      /// The namespace in which to create the elements, instead of the one the server named
+      Namespace: ResponseOverrideNamespace voption
       /// Whether to wrap the patch in a view transition, instead of what the server named
       UseViewTransition: bool voption }
     with
-    static member None = { Selector = ValueNone; Mode = ValueNone; UseViewTransition = ValueNone }
+    static member None = { Selector = ValueNone; Mode = ValueNone; Namespace = ValueNone; UseViewTransition = ValueNone }
 
 /// Values that replace what the server sends in the events a backend action receives. The browser applies them whatever the server said
 type ResponseOverrides =
@@ -180,6 +195,7 @@ type ResponseOverrides =
         | OverrideElements overrides ->
             overrides.Selector |> ValueOption.iter (fun selector -> jsonObject.Add("selector", selector))
             overrides.Mode |> ValueOption.iter (fun mode -> jsonObject.Add("mode", ResponseOverrideMode.Serialize mode))
+            overrides.Namespace |> ValueOption.iter (fun elementNamespace -> jsonObject.Add("namespace", ResponseOverrideNamespace.Serialize elementNamespace))
             overrides.UseViewTransition |> ValueOption.iter (fun useViewTransition -> jsonObject.Add("useViewTransition", JsonValue.Create useViewTransition))
         | OverrideSignals onlyIfMissing ->
             jsonObject.Add("onlyIfMissing", JsonValue.Create onlyIfMissing)

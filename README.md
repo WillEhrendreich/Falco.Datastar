@@ -473,7 +473,7 @@ These options are also available in Datastar 1.0.4:
 
 - `RequestCancellation = Cleanup` cancels the request when the element it is on is removed from the page.
 - `ContentType = CustomJson obj` sends the object as the request body, instead of the signals.
-- `ResponseOverrides` replaces values the server put in its response events. `OverrideElements` replaces the selector, mode and view transition of patch-elements events. `OverrideSignals` replaces `onlyIfMissing` on patch-signals events.
+- `ResponseOverrides` replaces values the server put in its response events. `OverrideElements` replaces the selector, mode, namespace and view transition of patch-elements events. `OverrideSignals` replaces `onlyIfMissing` on patch-signals events.
 
 ```fsharp
 Elem.button [ Ds.onClick (Ds.get ("/endpoint",

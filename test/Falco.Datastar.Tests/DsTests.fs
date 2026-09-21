@@ -133,7 +133,7 @@ module DsTests =
         |> should equal "@toggleAll()"
 
     [<Fact>]
-    let ``Ds.peek wraps the expression so it reads signals without subscribing`` () =
+    let ``Ds.peek wraps the expression in a function for @peek`` () =
         Ds.peek "$count"
         |> should equal "@peek(() => $count)"
 
@@ -145,17 +145,17 @@ module DsTests =
         |> should equal """<div data-bind:checked-state__prop.checked></div>"""
 
     [<Fact>]
-    let ``Ds.bindProp kebab-cases the property because the HTML parser lowercases attribute names`` () =
+    let ``Ds.bindProp writes the property name in kebab-case`` () =
         renderAttr (Ds.bindProp (SignalPath.sp "val", "someProp"))
         |> should equal """<div data-bind:val__prop.some-prop></div>"""
 
     [<Fact>]
-    let ``Ds.bindProp can also name the events that sync the signal`` () =
+    let ``Ds.bindProp can also list events`` () =
         renderAttr (Ds.bindProp (SignalPath.sp "val", "value", [ "input"; "change" ]))
         |> should equal """<div data-bind:val__prop.value__event.input.change></div>"""
 
     [<Fact>]
-    let ``Ds.bindEvent overrides the events that sync the signal`` () =
+    let ``Ds.bindEvent lists the events`` () =
         renderAttr (Ds.bindEvent (SignalPath.sp "val", [ "input"; "change" ]))
         |> should equal """<div data-bind:val__event.input.change></div>"""
 
@@ -177,17 +177,17 @@ module DsTests =
         |> should equal """@post('/x',{&quot;contentType&quot;:&quot;json&quot;,&quot;payload&quot;:{&quot;a&quot;:1}})"""
 
     [<Fact>]
-    let ``RequestOptions Defaults send nothing so that Datastar's own defaults apply`` () =
+    let ``RequestOptions Defaults write no options, so Datastar's defaults apply`` () =
         Ds.get ("/x", RequestOptions.Defaults)
         |> should equal "@get('/x',{})"
 
     [<Fact>]
-    let ``RequestOptions OpenWhenHidden is unset by default because Datastar defaults it per method`` () =
+    let ``RequestOptions OpenWhenHidden is not set by default`` () =
         RequestOptions.Defaults.OpenWhenHidden
         |> should equal (ValueNone : bool voption)
 
     [<Fact>]
-    let ``RequestOptions OpenWhenHidden false can be sent, which a POST needs because Datastar defaults it to true`` () =
+    let ``RequestOptions OpenWhenHidden can be set to false, even for a POST`` () =
         Ds.post ("/x", { RequestOptions.Defaults with OpenWhenHidden = ValueSome false })
         |> should equal """@post('/x',{&quot;openWhenHidden&quot;:false})"""
 
@@ -206,7 +206,7 @@ module DsTests =
         |> should equal """@query('/search',{&quot;requestCancellation&quot;:&quot;disabled&quot;})"""
 
     [<Fact>]
-    let ``RequestOptions ResponseOverrides for elements only lists the values that were set`` () =
+    let ``RequestOptions ResponseOverrides for elements writes only the values that are set`` () =
         let overrides = OverrideElements { ElementsOverrides.None with Selector = ValueSome "#target"; Mode = ValueSome Append }
         Ds.get ("/x", { RequestOptions.Defaults with ResponseOverrides = ValueSome overrides })
         |> should equal """@get('/x',{&quot;responseOverrides&quot;:{&quot;selector&quot;:&quot;#target&quot;,&quot;mode&quot;:&quot;append&quot;}})"""

@@ -15,7 +15,7 @@ module RocketTests =
     // Expressions
 
     [<Fact>]
-    let ``Rocket.local names a signal that is private to the component instance`` () =
+    let ``Rocket.local writes a $$ signal name`` () =
         Rocket.local "count" |> should equal "$$count"
 
     [<Fact>]
@@ -24,7 +24,7 @@ module RocketTests =
         Rocket.call ("add", [ "1"; "'a'" ]) |> should equal "@add(1, 'a')"
 
     [<Fact>]
-    let ``Rocket.root escapes a bind, computed or indicator to the page's signals`` () =
+    let ``Rocket.root adds the __root modifier to a bind, computed or indicator`` () =
         renderAttr (Rocket.root (Ds.bind "query"))
         |> should equal """<my-el data-bind:query__root></my-el>"""
         renderAttr (Rocket.root (Ds.computed (SignalPath.sp "total", "$a + $b")))
@@ -50,7 +50,7 @@ module RocketTests =
     [<InlineData("XMLHttpRequest", "xml-http-request")>]
     [<InlineData("p95Latency", "p-95-latency")>]
     [<InlineData("h1Title", "h-1-title")>]
-    let ``Rocket props are named the way Rocket derives the attribute from the prop name`` (propName: string, attribute: string) =
+    let ``Rocket props get the attribute name Rocket expects`` (propName: string, attribute: string) =
         renderAttr (Rocket.propString (propName, "v"))
         |> should equal $"""<my-el {attribute}="v"></my-el>"""
 
@@ -69,7 +69,7 @@ module RocketTests =
         renderAttr (Rocket.propNumber ("price", 9.99m)) |> should equal """<my-el price="9.99"></my-el>"""
 
     [<Fact>]
-    let ``Rocket.propNumber ignores the current culture because the browser parses with a dot`` () =
+    let ``Rocket.propNumber ignores the current culture`` () =
         // Built from the invariant culture so the test does not need ICU, which slim CI images lack
         let commaDecimal = CultureInfo.InvariantCulture.Clone() :?> CultureInfo
         commaDecimal.NumberFormat.NumberDecimalSeparator <- ","
@@ -82,7 +82,7 @@ module RocketTests =
             CultureInfo.CurrentCulture <- original
 
     [<Fact>]
-    let ``Rocket.propBool always writes the value, because absence means the prop's default which may be true`` () =
+    let ``Rocket.propBool writes false as well as true`` () =
         renderAttr (Rocket.propBool ("open", true)) |> should equal """<my-el open="true"></my-el>"""
         renderAttr (Rocket.propBool ("open", false)) |> should equal """<my-el open="false"></my-el>"""
 
@@ -99,7 +99,7 @@ module RocketTests =
         |> should equal """<my-el point="{&quot;userName&quot;:&quot;a&quot;,&quot;x&quot;:1}"></my-el>"""
 
     [<Fact>]
-    let ``Rocket.propJson handles arrays, which Rocket's array, tuple and object codecs all decode`` () =
+    let ``Rocket.propJson writes arrays as JSON`` () =
         renderAttr (Rocket.propJson ("items", [ 1; 2; 3 ]))
         |> should equal """<my-el items="[1,2,3]"></my-el>"""
 
@@ -111,7 +111,7 @@ module RocketTests =
     // Template directives: Rocket always uses the attribute names data-for, data-if, data-else-if and data-else
 
     [<Fact>]
-    let ``Rocket.templateFor leaves Rocket's own item and index names alone unless asked`` () =
+    let ``Rocket.templateFor writes no item or index names unless you pass them`` () =
         renderNode (Rocket.templateFor ("$$items", [ Text.raw "x" ]))
         |> should equal """<template data-for="$$items">x</template>"""
 
@@ -123,7 +123,7 @@ module RocketTests =
         |> should equal """<template data-for="todo, n in $$todos">x</template>"""
 
     [<Fact>]
-    let ``Rocket.templateFor with only an index uses Rocket's default item name, as an index alone is not valid`` () =
+    let ``Rocket.templateFor with only an index names the item "item"`` () =
         renderNode (Rocket.templateFor ("$$todos", [ Text.raw "x" ], index = "n"))
         |> should equal """<template data-for="item, n in $$todos">x</template>"""
 

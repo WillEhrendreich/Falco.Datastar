@@ -46,7 +46,7 @@ let private casePage =
           Elem.span [ Attr.id "seen-out"; Ds.text "$seen" ] [] ] []
 
 // The manifest that a page publishes, and what Request.getRocketManifests made of it
-let manifests = ConcurrentQueue<Result<RocketManifestDocument, string>>()
+let manifests = ConcurrentQueue<Result<RocketManifestDocument, RocketManifestError>>()
 
 let private manifestPage =
     page "manifest" [ Elem.create "demo-card" [] []; Elem.create "demo-plain" [] [] ] [

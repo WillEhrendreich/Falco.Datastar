@@ -70,7 +70,7 @@ type BrowserTests(browser:BrowserFixture) =
             theme.Values |> ValueOption.map List.length |> should equal (ValueSome 3)
             card.Slots |> List.map (fun s -> s.Name) |> should equal [ "default" ]
             card.Events |> List.map (fun e -> e.Kind) |> should equal [ RocketEventKind.CustomEvent ]
-        | Some (Error message) -> failwith message
+        | Some (Error error) -> failwith error.Message
         | None -> failwith "The page published, but the server did not receive a manifest"
     }
 

@@ -16,7 +16,7 @@ module RocketManifestTests =
     let private parsed () =
         match RocketManifest.parse posted with
         | Ok document -> document
-        | Error message -> failwith message
+        | Error error -> failwith error.Message
 
     let private component' tag =
         (parsed ()).Components |> List.find (fun c -> c.Tag = tag)
@@ -57,7 +57,7 @@ module RocketManifestTests =
         let json = """{"version":1,"generatedAt":"2026-01-01T00:00:00.000Z","components":[{"tag":"x-y","props":[{"name":"p","attribute":"p","type":"hologram","default":null,"required":false}],"slots":[],"events":[]}]}"""
         match RocketManifest.parse json with
         | Ok document -> document.Components.Head.Props.Head.Type |> should equal (RocketPropType.Other "hologram")
-        | Error message -> failwith message
+        | Error error -> failwith error.Message
 
     [<Fact>]
     let ``RocketManifest.parse keeps the default of a prop as JSON`` () =
@@ -99,24 +99,20 @@ module RocketManifestTests =
         events |> List.map (fun e -> e.Description) |> should equal [ ValueSome "Dismiss."; ValueNone ]
 
     [<Fact>]
-    let ``RocketManifest.parse says which version it reads, and what to do, when it gets another one`` () =
-        match RocketManifest.parse """{"version":2,"generatedAt":"2026-01-01T00:00:00.000Z","components":[]}""" with
-        | Error message ->
-            message |> should haveSubstring "reads Rocket manifest version 1, but the document is version 2"
-            message |> should haveSubstring "Update Falco.Datastar"
-        | Ok _ -> failwith "expected an error"
+    let ``RocketManifest.parse returns the version it reads and the version it got when they differ`` () =
+        RocketManifest.parse """{"version":2,"generatedAt":"2026-01-01T00:00:00.000Z","components":[]}"""
+        |> should equal (Error (UnsupportedVersion (2, 1)) : Result<RocketManifestDocument, RocketManifestError>)
 
     [<Fact>]
     let ``RocketManifest.parse returns an error for text that is not JSON`` () =
         match RocketManifest.parse "not json" with
-        | Error message -> message |> should startWith "The manifest is not valid JSON"
-        | Ok _ -> failwith "expected an error"
+        | Error (NotJson _) -> ()
+        | other -> failwith $"expected NotJson, got %A{other}"
 
     [<Fact>]
     let ``RocketManifest.parse names the property that is missing`` () =
-        match RocketManifest.parse """{"version":1,"generatedAt":"2026-01-01T00:00:00.000Z"}""" with
-        | Error message -> message |> should haveSubstring "components"
-        | Ok _ -> failwith "expected an error"
+        RocketManifest.parse """{"version":1,"generatedAt":"2026-01-01T00:00:00.000Z"}"""
+        |> should equal (Error (Missing ("components", "the manifest")) : Result<RocketManifestDocument, RocketManifestError>)
 
     [<Fact>]
     let ``Request.getRocketManifests reads the body of a POST`` () =
@@ -125,39 +121,39 @@ module RocketManifestTests =
         ctx.Request.Body <- new MemoryStream(Encoding.UTF8.GetBytes posted)
         match (Request.getRocketManifests ctx).GetAwaiter().GetResult() with
         | Ok document -> document.Components |> List.length |> should equal 2
-        | Error message -> failwith message
+        | Error error -> failwith error.Message
 
     let private wrap (component':string) =
         $"""{{"version":1,"generatedAt":"2026-01-01T00:00:00.000Z","components":[{component'}]}}"""
 
     [<Fact>]
     let ``RocketManifest.parse returns an error, and does not throw, when components is not a list`` () =
-        match RocketManifest.parse """{"version":1,"generatedAt":"2026-01-01T00:00:00.000Z","components":5}""" with
-        | Error message -> message |> should haveSubstring "components"
-        | Ok _ -> failwith "expected an error"
+        RocketManifest.parse """{"version":1,"generatedAt":"2026-01-01T00:00:00.000Z","components":5}"""
+        |> should equal (Error (WrongKind ("components", "a list", "the manifest")) : Result<RocketManifestDocument, RocketManifestError>)
 
     [<Fact>]
     let ``RocketManifest.parse names the prop and the component when a prop property is missing`` () =
-        match RocketManifest.parse (wrap """{"tag":"my-card","props":[{"name":"count","type":"number","default":0}]}""") with
-        | Error message ->
-            message |> should haveSubstring "attribute"
-            message |> should haveSubstring "count"
-            message |> should haveSubstring "my-card"
-        | Ok _ -> failwith "expected an error"
+        RocketManifest.parse (wrap """{"tag":"my-card","props":[{"name":"count","type":"number","default":0}]}""")
+        |> should equal (Error (Missing ("attribute", "the prop \"count\" of my-card")) : Result<RocketManifestDocument, RocketManifestError>)
 
     [<Fact>]
     let ``RocketManifest.parse gives the position of a prop that has no name`` () =
-        match RocketManifest.parse (wrap """{"tag":"my-card","props":[{"name":"a","attribute":"a","type":"string","default":""},{"attribute":"b","type":"string","default":""}]}""") with
-        | Error message ->
-            message |> should haveSubstring "prop 2"
-            message |> should haveSubstring "my-card"
-        | Ok _ -> failwith "expected an error"
+        RocketManifest.parse (wrap """{"tag":"my-card","props":[{"name":"a","attribute":"a","type":"string","default":""},{"attribute":"b","type":"string","default":""}]}""")
+        |> should equal (Error (Missing ("name", "prop 2 of my-card")) : Result<RocketManifestDocument, RocketManifestError>)
 
     [<Fact>]
     let ``Request.getRocketManifests refuses a body that is larger than one mebibyte`` () =
         let ctx = DefaultHttpContext()
         ctx.Request.Method <- "POST"
         ctx.Request.Body <- new MemoryStream(Encoding.UTF8.GetBytes (String('x', 1024 * 1024 + 1)))
-        match (Request.getRocketManifests ctx).GetAwaiter().GetResult() with
-        | Error message -> message |> should haveSubstring "larger than"
-        | Ok _ -> failwith "expected an error"
+        (Request.getRocketManifests ctx).GetAwaiter().GetResult()
+        |> should equal (Error (TooLarge (1024 * 1024)) : Result<RocketManifestDocument, RocketManifestError>)
+
+    [<Fact>]
+    let ``RocketManifestError.Message says what is wrong and what to do about it`` () =
+        (UnsupportedVersion (2, 1)).Message |> should haveSubstring "reads Rocket manifest version 1, but the document is version 2"
+        (UnsupportedVersion (2, 1)).Message |> should haveSubstring "Update Falco.Datastar"
+        (Missing ("attribute", "the prop \"count\" of my-card")).Message |> should equal "The manifest has no \"attribute\" in the prop \"count\" of my-card"
+        (WrongKind ("components", "a list", "the manifest")).Message |> should equal "The \"components\" in the manifest is not a list"
+        (TooLarge (1024 * 1024)).Message |> should haveSubstring "larger than 1 MiB"
+        (NotJson "bad").Message |> should equal "The manifest is not valid JSON: bad"

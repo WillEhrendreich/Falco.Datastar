@@ -828,12 +828,13 @@ let handleManifests : HttpHandler = fun ctx -> task {
         for info in manifest.Components do
             printfn "%s has %d props" info.Tag info.Props.Length
         return Response.ofEmpty ctx
-    | Error message ->
-        return (Response.withStatusCode 400 >> Response.ofPlainText message) ctx
+    | Error error ->
+        return (Response.withStatusCode 400 >> Response.ofPlainText error.Message) ctx
 }
 ```
 
-It returns an error message when the body is not JSON, when a required property is missing, or when the document has a version other than 1. The message names the component and the prop it is about. `Request.getRocketManifests` also refuses a body larger than 1 MiB without reading the rest of it.
+The error is a `RocketManifestError`: `NotJson`, `TooLarge`, `Missing`, `WrongKind` or `UnsupportedVersion`. Match on it, or use its `Message`, which says what is wrong and what to do about it.
+`Missing` and `WrongKind` say where the problem is, for example the prop "count" of my-card. `Request.getRocketManifests` refuses a body larger than 1 MiB without reading the rest of it.
 A codec name that this library does not know is kept as `RocketPropType.Other`, so a newer Rocket does not break it.
 This reads the manifest only. Generating F# code from it is left to a separate tool.
 

@@ -1,0 +1,277 @@
+namespace Falco.Datastar
+
+open System
+open System.Globalization
+open System.Text.Json
+
+/// The codec a Rocket component gave a prop. Write it with its type name, e.g. RocketPropType.Number.
+/// Rocket may add codecs, so a name this library does not know is kept as Other.
+[<RequireQualifiedAccess>]
+type RocketPropType =
+    | String
+    | Number
+    | Boolean
+    | Date
+    | Json
+    | Js
+    | Binary
+    | Array
+    | Tuple
+    | Object
+    | OneOf
+    | Custom
+    | Other of string
+
+/// Whether a component event is a plain event or a custom event with a payload. Write it with its type name.
+[<RequireQualifiedAccess>]
+type RocketEventKind =
+    | Event
+    | CustomEvent
+    | Other of string
+
+/// The documentation a component author gave a prop with the docs(...) method of its codec
+type RocketPropDocs =
+    { Description: string voption
+      Label: string voption
+      /// The kind of control a tool should show: auto, text, textarea, number, boolean or select
+      Control: string voption
+      Placeholder: string voption }
+
+/// A prop of a Rocket component, as Rocket described it in a manifest
+type RocketManifestProp =
+    { Name: string
+      /// The attribute the prop is read from, e.g. max-count for maxCount
+      Attribute: string
+      Type: RocketPropType
+      /// The value the prop has when the attribute is missing, as JSON
+      Default: JsonElement
+      Required: bool
+      /// The values a oneOf prop allows
+      Values: JsonElement list voption
+      Docs: RocketPropDocs voption }
+
+/// A slot of a Rocket component, as its author documented it
+type RocketManifestSlot =
+    { Name: string
+      Description: string voption }
+
+/// An event of a Rocket component, as its author documented it
+type RocketManifestEvent =
+    { Name: string
+      Kind: RocketEventKind
+      Bubbles: bool voption
+      Composed: bool voption
+      Description: string voption }
+
+/// One Rocket component in a manifest
+type RocketManifestComponent =
+    { Tag: string
+      Props: RocketManifestProp list
+      Slots: RocketManifestSlot list
+      Events: RocketManifestEvent list }
+
+/// What Rocket's publishRocketManifests posts: every component the page defined, sorted by tag
+type RocketManifestDocument =
+    { Version: int
+      GeneratedAt: DateTimeOffset
+      Components: RocketManifestComponent list }
+
+/// Why a manifest could not be read. The first problem found is the one reported.
+/// A case with a place says where in the manifest the problem is, for example: the prop "count" of my-card.
+type RocketManifestError =
+    /// The text is not JSON
+    | NotJson of reason:string
+    /// The body is larger than the limit, so it was not read
+    | TooLarge of limitBytes:int
+    /// A property that the manifest needs is not there
+    | Missing of property:string * place:string
+    /// A property is there, but it is not the kind of value that it should be, such as text, a number, a date or a list
+    | WrongKind of property:string * expected:string * place:string
+    /// The manifest has a version that this library does not read
+    | UnsupportedVersion of found:int * supported:int
+    with
+    /// A message for a person, that says what is wrong and what to do about it
+    member error.Message =
+        match error with
+        | NotJson reason -> $"The manifest is not valid JSON: {reason}"
+        | TooLarge limitBytes ->
+            $"The manifest is larger than {limitBytes / 1024 / 1024} MiB, so it was not read. The manifest of a page is far smaller than that. Check what is posting to this endpoint."
+        | Missing (property, place) -> $"The manifest has no \"{property}\" in {place}"
+        | WrongKind (property, expected, place) -> $"The \"{property}\" in {place} is not {expected}"
+        | UnsupportedVersion (found, supported) ->
+            $"This library reads Rocket manifest version {supported}, but the document is version {found}. Update Falco.Datastar to a version that reads it, or check that the page and this server use compatible versions of Datastar."
+
+/// <summary>
+/// Reads the document that Rocket's <c>publishRocketManifests</c> posts to your server: one entry for every component the page defined,
+/// with its props (from their codecs), slots and events. A docs build or a component registry can store it.
+/// https://github.com/starfederation/datastar/blob/v1.0.4/library/src/rocket/runtime.ts
+/// </summary>
+[<RequireQualifiedAccess>]
+module RocketManifest =
+    let private property (name:string) (element:JsonElement) =
+        match element.ValueKind with
+        | JsonValueKind.Object ->
+            match element.TryGetProperty name with
+            | true, value -> ValueSome value
+            | false, _ -> ValueNone
+        | _ -> ValueNone
+
+    let private required (name:string) (place:string) (element:JsonElement) =
+        match property name element with
+        | ValueSome value -> Ok value
+        | ValueNone -> Error (Missing (name, place))
+
+    let private text (name:string) (place:string) (element:JsonElement) =
+        required name place element
+        |> Result.bind (fun value ->
+            match value.ValueKind with
+            | JsonValueKind.String -> Ok (value.GetString())
+            | _ -> Error (WrongKind (name, "text", place)))
+
+    let private optionalText (name:string) (element:JsonElement) =
+        match property name element with
+        | ValueSome value when value.ValueKind = JsonValueKind.String -> ValueSome (value.GetString())
+        | _ -> ValueNone
+
+    let private optionalBool (name:string) (element:JsonElement) =
+        match property name element with
+        | ValueSome value when value.ValueKind = JsonValueKind.True -> ValueSome true
+        | ValueSome value when value.ValueKind = JsonValueKind.False -> ValueSome false
+        | _ -> ValueNone
+
+    let private items (name:string) (element:JsonElement) =
+        match property name element with
+        | ValueSome value when value.ValueKind = JsonValueKind.Array -> value.EnumerateArray() |> List.ofSeq
+        | _ -> []
+
+    /// Reads every element and stops at the first error. The reader is given the position of the element, counting from 1, to say where an error is.
+    let private readAll (read:int -> JsonElement -> Result<'T, RocketManifestError>) (elements:JsonElement list) =
+        elements
+        |> List.indexed
+        |> List.fold (fun collected (index, element) -> collected |> Result.bind (fun readSoFar -> read (index + 1) element |> Result.map (fun item -> item :: readSoFar))) (Ok [])
+        |> Result.map List.rev
+
+    /// Says which entry an error is about: by its name when it has one, and by its position when it does not.
+    let private describe (kind:string) (owner:string) (position:int) (element:JsonElement) =
+        match optionalText "name" element with
+        | ValueSome name -> $"the {kind} \"{name}\" of {owner}"
+        | ValueNone -> $"{kind} {position} of {owner}"
+
+    let private propType (name:string) =
+        match name with
+        | "string" -> RocketPropType.String
+        | "number" -> RocketPropType.Number
+        | "boolean" -> RocketPropType.Boolean
+        | "date" -> RocketPropType.Date
+        | "json" -> RocketPropType.Json
+        | "js" -> RocketPropType.Js
+        | "binary" -> RocketPropType.Binary
+        | "array" -> RocketPropType.Array
+        | "tuple" -> RocketPropType.Tuple
+        | "object" -> RocketPropType.Object
+        | "oneOf" -> RocketPropType.OneOf
+        | "custom" -> RocketPropType.Custom
+        | other -> RocketPropType.Other other
+
+    let private eventKind (name:string) =
+        match name with
+        | "event" -> RocketEventKind.Event
+        | "custom-event" -> RocketEventKind.CustomEvent
+        | other -> RocketEventKind.Other other
+
+    let private readDocs (element:JsonElement) =
+        match property "docs" element with
+        | ValueSome docs when docs.ValueKind = JsonValueKind.Object ->
+            ValueSome { Description = optionalText "description" docs
+                        Label = optionalText "label" docs
+                        Control = optionalText "control" docs
+                        Placeholder = optionalText "placeholder" docs }
+        | _ -> ValueNone
+
+    let private readProp (tag:string) (position:int) (element:JsonElement) =
+        let place = describe "prop" tag position element
+        text "name" place element
+        |> Result.bind (fun name ->
+            text "attribute" place element
+            |> Result.bind (fun attribute ->
+                text "type" place element
+                |> Result.bind (fun typeName ->
+                    required "default" place element
+                    |> Result.map (fun defaultValue ->
+                        { Name = name
+                          Attribute = attribute
+                          Type = propType typeName
+                          Default = defaultValue.Clone()
+                          Required = optionalBool "required" element |> ValueOption.defaultValue false
+                          Values =
+                            match property "values" element with
+                            | ValueSome values when values.ValueKind = JsonValueKind.Array ->
+                                ValueSome (values.EnumerateArray() |> Seq.map (fun value -> value.Clone()) |> List.ofSeq)
+                            | _ -> ValueNone
+                          Docs = readDocs element }))))
+
+    let private readSlot (tag:string) (position:int) (element:JsonElement) =
+        text "name" (describe "slot" tag position element) element
+        |> Result.map (fun name -> { Name = name; Description = optionalText "description" element })
+
+    let private readEvent (tag:string) (position:int) (element:JsonElement) =
+        text "name" (describe "event" tag position element) element
+        |> Result.map (fun name ->
+            { Name = name
+              Kind = optionalText "kind" element |> ValueOption.map eventKind |> ValueOption.defaultValue RocketEventKind.Event
+              Bubbles = optionalBool "bubbles" element
+              Composed = optionalBool "composed" element
+              Description = optionalText "description" element })
+
+    let private readComponent (position:int) (element:JsonElement) =
+        text "tag" $"component {position}" element
+        |> Result.bind (fun tag ->
+            readAll (readProp tag) (items "props" element)
+            |> Result.bind (fun props ->
+                readAll (readSlot tag) (items "slots" element)
+                |> Result.bind (fun slots ->
+                    readAll (readEvent tag) (items "events" element)
+                    |> Result.map (fun events -> { Tag = tag; Props = props; Slots = slots; Events = events }))))
+
+    let private supportedVersion = 1
+
+    let private readVersion (root:JsonElement) =
+        required "version" "the manifest" root
+        |> Result.bind (fun version ->
+            match version.ValueKind, version.TryGetInt32() with
+            | JsonValueKind.Number, (true, number) when number = supportedVersion -> Ok number
+            | JsonValueKind.Number, (true, number) -> Error (UnsupportedVersion (number, supportedVersion))
+            | _ -> Error (WrongKind ("version", "a number", "the manifest")))
+
+    let private readGeneratedAt (root:JsonElement) =
+        text "generatedAt" "the manifest" root
+        |> Result.bind (fun generatedAt ->
+            match DateTimeOffset.TryParse(generatedAt, CultureInfo.InvariantCulture, DateTimeStyles.None) with
+            | true, moment -> Ok moment
+            | false, _ -> Error (WrongKind ("generatedAt", "a date", "the manifest")))
+
+    let private readComponents (root:JsonElement) =
+        required "components" "the manifest" root
+        |> Result.bind (fun components ->
+            match components.ValueKind with
+            | JsonValueKind.Array -> readAll readComponent (components.EnumerateArray() |> List.ofSeq)
+            | _ -> Error (WrongKind ("components", "a list", "the manifest")))
+
+    let private readDocument (root:JsonElement) =
+        readVersion root
+        |> Result.bind (fun version ->
+            readGeneratedAt root
+            |> Result.bind (fun generatedAt ->
+                readComponents root
+                |> Result.map (fun components -> { Version = version; GeneratedAt = generatedAt; Components = components })))
+
+    /// <summary>
+    /// Reads the JSON that <c>publishRocketManifests</c> posted. It returns an error when the text is not JSON,
+    /// when a required property is missing or is the wrong kind of value, or when the document has a version other than 1.
+    /// </summary>
+    /// <param name="json">The body of the request</param>
+    let parse (json:string) : Result<RocketManifestDocument, RocketManifestError> =
+        try
+            use document = JsonDocument.Parse json
+            readDocument document.RootElement
+        with :? JsonException as error -> Error (NotJson error.Message)

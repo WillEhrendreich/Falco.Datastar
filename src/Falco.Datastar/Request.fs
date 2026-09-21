@@ -33,7 +33,7 @@ let getSignalsJson (ctx:HttpContext) =
 let private maxManifestBytes = 1024 * 1024
 
 /// <summary>
-/// Read the manifest that Rocket's publishRocketManifests posts to your server. It returns an error message when the body is not a manifest this library can read,
+/// Read the manifest that Rocket's publishRocketManifests posts to your server. It returns a RocketManifestError when the body is not a manifest this library can read,
 /// or when it is larger than 1 MiB, in which case the rest of the body is not read.
 /// Can only call this once per request
 /// </summary>
@@ -50,7 +50,7 @@ let getRocketManifests (ctx:HttpContext) =
             | count -> body.Write(chunk, 0, count)
         match body.Length > int64 maxManifestBytes with
         | true ->
-            return Error "The manifest is larger than 1 MiB, so it was not read. The manifest of a page is far smaller than that. Check what is posting to this endpoint."
+            return Error (TooLarge maxManifestBytes)
         | false ->
             return RocketManifest.parse (System.Text.Encoding.UTF8.GetString(body.GetBuffer(), 0, int body.Length))
     }

@@ -177,6 +177,26 @@ module DsTests =
         |> should equal """@post('/x',{&quot;contentType&quot;:&quot;json&quot;,&quot;payload&quot;:{&quot;a&quot;:1}})"""
 
     [<Fact>]
+    let ``RequestOptions Defaults send nothing so that Datastar's own defaults apply`` () =
+        Ds.get ("/x", RequestOptions.Defaults)
+        |> should equal "@get('/x',{})"
+
+    [<Fact>]
+    let ``RequestOptions OpenWhenHidden is unset by default because Datastar defaults it per method`` () =
+        RequestOptions.Defaults.OpenWhenHidden
+        |> should equal (ValueNone : bool voption)
+
+    [<Fact>]
+    let ``RequestOptions OpenWhenHidden false can be sent, which a POST needs because Datastar defaults it to true`` () =
+        Ds.post ("/x", { RequestOptions.Defaults with OpenWhenHidden = ValueSome false })
+        |> should equal """@post('/x',{&quot;openWhenHidden&quot;:false})"""
+
+    [<Fact>]
+    let ``RequestOptions OpenWhenHidden true is sent as a JSON boolean`` () =
+        Ds.get ("/x", { RequestOptions.Defaults with OpenWhenHidden = ValueSome true })
+        |> should equal """@get('/x',{&quot;openWhenHidden&quot;:true})"""
+
+    [<Fact>]
     let ``Ds.query creates a query action`` () =
         Ds.query "/search" |> should equal """@query('/search')"""
 

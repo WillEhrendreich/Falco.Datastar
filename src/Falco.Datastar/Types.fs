@@ -194,8 +194,9 @@ type RequestOptions = {
       Headers: (string * string) list
 
       /// Whether to keep the connection open when the page is hidden. Useful for dashboards
-      /// but can cause a drain on battery life and other resources when enabled. Defaults to false.
-      OpenWhenHidden: bool
+      /// but can cause a drain on battery life and other resources when enabled.
+      /// Unset by default, so Datastar decides: false for @get, true for the other actions.
+      OpenWhenHidden: bool voption
 
       /// Determines on what to retry; auto, error, always, never
       Retry: Retry
@@ -225,7 +226,7 @@ type RequestOptions = {
         { ContentType = Json
           FilterSignals = SignalsFilter.None
           Headers = []
-          OpenWhenHidden = false
+          OpenWhenHidden = ValueNone
           Retry = Retry.OnAuto
           RetryInterval = TimeSpan.FromSeconds(1.0)
           RetryScaler = 2.0
@@ -258,8 +259,8 @@ type RequestOptions = {
             backendActionOptions.Headers |> List.iter headerObject.Add
             jsonObject.Add("headers", headerObject)
 
-        if backendActionOptions.OpenWhenHidden <> RequestOptions.Defaults.OpenWhenHidden then
-            jsonObject.Add("openWhenHidden", backendActionOptions.OpenWhenHidden.ToString().ToLower())
+        backendActionOptions.OpenWhenHidden
+        |> ValueOption.iter (fun openWhenHidden -> jsonObject.Add("openWhenHidden", JsonValue.Create openWhenHidden))
 
         if backendActionOptions.RetryInterval <> RequestOptions.Defaults.RetryInterval then
             jsonObject.Add("retryInterval", backendActionOptions.RetryInterval.TotalMilliseconds)

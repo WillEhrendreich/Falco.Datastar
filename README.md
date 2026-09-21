@@ -454,7 +454,7 @@ Each request action can also be provided a number of options, explained in depth
 Elem.button [ Ds.onClick (Ds.get ("/endpoint",
                                   { RequestOptions.Defaults with
                                         Headers = [ ("X-Csrf-Token", "JImikTbsoCYQ9...") ]
-                                        OpenWhenHidden = true }
+                                        OpenWhenHidden = ValueSome true }
                                  )) ] [ Text.raw "Push the Button" ]
 ```
 

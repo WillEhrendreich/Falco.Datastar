@@ -222,7 +222,7 @@ type Ds =
 
     /// <summary>
     /// Datastar walks the entire DOM and applies plugins to each element it encounters.
-    /// It’s possible to tell Datastar to ignore an element and its descendants by placing a data-star-ignore attribute on it.
+    /// It’s possible to tell Datastar to ignore an element and its descendants by placing a data-ignore attribute on it.
     /// This can be useful for preventing naming conflicts with third-party libraries.
     /// https://data-star.dev/reference/attributes#data-ignore
     /// </summary>
@@ -232,7 +232,7 @@ type Ds =
 
     /// <summary>
     /// Datastar walks the entire DOM and applies plugins to each element it encounters.
-    /// It’s possible to tell Datastar to ignore an element and its descendants by placing a data-star-ignore attribute on it.
+    /// It’s possible to tell Datastar to ignore an element and its descendants by placing a data-ignore attribute on it.
     /// This can be useful for preventing naming conflicts with third-party libraries.
     /// This only ignores the element it is attached to.
     /// https://data-star.dev/reference/attributes#data-ignore
@@ -245,6 +245,7 @@ type Ds =
 
     /// <summary>
     /// Similar to the Ds.ignore, the data-ignore-morph attribute tells the PatchElements watcher to skip processing an element and its children when morphing elements.
+    /// An element is skipped when both the element on the page and the element the server sent have the attribute, or when the element on the page is inside an element that has it.
     /// https://data-star.dev/reference/attributes#data-ignore-morph
     /// </summary>
     /// <returns>Attribute</returns>
@@ -450,7 +451,7 @@ type Ds =
 
     /// <summary>
     /// Creates a @delete action for an expression. The action sends a DELETE request to the given url.
-    /// Signals are sent with the body of the request.
+    /// Signals are sent in the `datastar` query parameter, as for @get, because a DELETE request has no body.
     /// https://data-star.dev/reference/actions#delete
     /// https://data-star.dev/reference/actions#options
     /// </summary>

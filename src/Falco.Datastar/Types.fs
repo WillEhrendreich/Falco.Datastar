@@ -118,7 +118,7 @@ type Retry =
         | OnNever -> "never"
 
 type RequestCancellation =
-    /// cancels existing requests on the same element; default
+    /// cancels an earlier request with the same method and URL; default
     | Auto
     /// allows concurrent requests
     | Disabled

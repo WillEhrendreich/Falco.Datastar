@@ -141,7 +141,7 @@ Some important notes: Signals defined later in the DOM tree override those defin
 - [data-class](#dsclass--data-class)
 - [data-computed](#dscomputed--data-computed)
 - [data-effect](#dseffect--data-effect)
-- [data-ignore](#dsignore--dsignoreself--dsignoremorph--data-star-ignore)
+- [data-ignore](#dsignore--dsignoreself--dsignoremorph--data-ignore)
 - [data-indicator](#dsindicator--data-indicator)
 - [data-json-signals](#dssignals--dssignal--data-signals)
 - [data-init](#dsinit--data-init)
@@ -429,7 +429,7 @@ These actions make requests to any backend service that supports Server Side Eve
 Luckily an F#-friendly [SDK exists](https://data-star.dev/reference/sdks#dotnet) and `Falco.Datastar` has several [helper methods](#reading-signals-and-server-side-events)
 
 All signals, that do not have an underscore prefix, are sent in the request.
-`@get` will send the signal values as query parameters. All others are sent within a JSON body.
+`@get` and `@delete` send the signal values in the `datastar` query parameter. The other actions send them in a JSON body.
 
 ```fsharp
 Elem.div [ Ds.init (Ds.get "/get") ] []
@@ -537,14 +537,15 @@ Elem.html [ Ds.nonce nonce ] [
 ]
 ```
 
-### [Ds.ignore | Ds.ignoreSelf | Ds.ignoreMorph : `data-star-ignore`](https://data-star.dev/reference/attributes#data-ignore)
+### [Ds.ignore | Ds.ignoreSelf | Ds.ignoreMorph : `data-ignore`](https://data-star.dev/reference/attributes#data-ignore)
 
 Datastar walks the entire DOM and applies plugins to each element it encounters.
-It’s possible to tell Datastar to ignore an element and its descendants by placing a data-star-ignore attribute on it.
+It’s possible to tell Datastar to ignore an element and its descendants by placing a data-ignore attribute on it.
 This can be useful for preventing naming conflicts with third-party libraries.
 
 `Ds.ignore` will force Datastar to ignore the element and all child elements.
 `Ds.ignoreSelf` only affects the attribute it is attached to.
+`Ds.ignoreMorph` stops a server patch from changing the element. It applies when both the element on the page and the element the server sends have the attribute, or when the element on the page is inside an element that has it.
 
 ```fsharp
 Elem.div [ Ds.ignore ] [

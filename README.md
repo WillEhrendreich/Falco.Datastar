@@ -493,17 +493,6 @@ These options are also available in Datastar 1.0.4:
 
 - `RequestCancellation = Cleanup` cancels the request when the element it is on is removed from the page.
 - `ContentType = CustomJson obj` sends the object as the request body, instead of the signals.
-- `ResponseOverrides` replaces values the server put in its response events. Datastar 1.0.4 supports it, but Datastar's documentation does not describe it, so it may change. `OverrideElements` replaces the selector, mode, namespace and view transition of patch-elements events. `OverrideSignals` replaces `onlyIfMissing` on patch-signals events.
-
-```fsharp
-Elem.button [ Ds.onClick (Ds.get ("/endpoint",
-                                  { RequestOptions.Defaults with
-                                        ResponseOverrides =
-                                            ValueSome (OverrideElements { ElementsOverrides.None with
-                                                                              Selector = ValueSome "#results"
-                                                                              Mode = ValueSome Append }) }
-                                 )) ] [ Text.raw "Load more" ]
-```
 
 ### [`@setAll`](https://data-star.dev/reference/actions#setall)
 
@@ -864,37 +853,6 @@ let appendRows =
 Response.ofHtmlElementsOptions appendRows (Elem.tr [] [ Elem.td [] [ Text.raw "New row" ] ])
 ```
 
-## _Responding without Server Side Events_
-
-A backend action does not have to answer with an event stream. Datastar also handles [plain responses](https://data-star.dev/reference/actions#response-handling), by their content type:
-`text/html` patches elements, `application/json` patches signals, and `text/javascript` runs a script.
-Response headers that start with `datastar-` adjust what happens. Falco already has what you need to send these, so this library adds no functions for them.
-
-```fsharp
-// open Microsoft.AspNetCore.Http
-
-// text/html: add an element to the end of a list
-let handleAdd : HttpHandler =
-    Response.withHeaders [ "datastar-selector", "#list"; "datastar-mode", "append" ]
-    >> Response.ofHtml (Elem.li [] [ Text.raw "New item" ])
-
-// application/json: patch signals, and keep the ones that already exist
-let handleDefaults : HttpHandler =
-    Response.withHeaders [ "datastar-only-if-missing", "true" ]
-    >> Response.ofJson {| count = 0 |}
-
-// text/javascript: run a script in the browser
-let handleScript : HttpHandler = fun ctx ->
-    ctx.Response.ContentType <- "text/javascript"
-    ctx.Response.WriteAsync "console.log('hello from the server')"
-```
-
-- `text/html` accepts the headers `datastar-selector`, `datastar-mode` and `datastar-use-view-transition`.
-- `application/json` accepts `datastar-only-if-missing`, which keeps the signals that already exist.
-- `text/javascript` accepts `datastar-script-attributes`, a JSON object of attributes for the script element.
-
-`Response.ofPlainText` sets the content type to `text/plain`, so a JavaScript response has to set `text/javascript` itself, as in the sample.
-
 ## _Streaming Server Side Events_
 
 Within the `Response` module there are the `of` methods that are for sending single server side events and then closing the connection.
@@ -942,9 +900,6 @@ This section covers upgrading to version 1.4.0 from version 1.3.0 or earlier. It
 Take care with `OpenWhenHidden = false`. The old code never sent it, so `@post`, `@put`, `@patch` and `@delete` ignored it and kept running while the page was hidden, because that is Datastar's default for them.
 `ValueSome false` is sent, so those requests are now cancelled when the page is hidden and started again when it is visible.
 If you want the old behaviour, delete the line. On a `@get`, `ValueSome false` is the same as leaving it out.
-
-**`RequestOptions` has a new field, `ResponseOverrides`.** Code that starts from `RequestOptions.Defaults` and uses `with` needs no change.
-Code that lists every field of the record fails with error FS0764. Add `ResponseOverrides = ValueNone`, or start from `RequestOptions.Defaults` instead.
 
 ### Changes that produce warnings
 

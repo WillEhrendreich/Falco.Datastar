@@ -273,29 +273,3 @@ module DsTests =
         Ds.query ("/search", { RequestOptions.Defaults with RequestCancellation = Disabled })
         |> should equal """@query('/search',{&quot;requestCancellation&quot;:&quot;disabled&quot;})"""
 
-    [<Fact>]
-    let ``RequestOptions ResponseOverrides for elements writes only the values that are set`` () =
-        let overrides = OverrideElements { ElementsOverrides.None with Selector = ValueSome "#target"; Mode = ValueSome Append }
-        Ds.get ("/x", { RequestOptions.Defaults with ResponseOverrides = ValueSome overrides })
-        |> should equal """@get('/x',{&quot;responseOverrides&quot;:{&quot;selector&quot;:&quot;#target&quot;,&quot;mode&quot;:&quot;append&quot;}})"""
-
-    [<Fact>]
-    let ``RequestOptions ResponseOverrides can turn on view transitions`` () =
-        let overrides = OverrideElements { ElementsOverrides.None with UseViewTransition = ValueSome true }
-        Ds.get ("/x", { RequestOptions.Defaults with ResponseOverrides = ValueSome overrides })
-        |> should equal """@get('/x',{&quot;responseOverrides&quot;:{&quot;useViewTransition&quot;:true}})"""
-
-    [<Fact>]
-    let ``RequestOptions ResponseOverrides for elements can set the namespace`` () =
-        let overrides = OverrideElements { ElementsOverrides.None with Namespace = ValueSome ResponseOverrideNamespace.Svg }
-        Ds.get ("/x", { RequestOptions.Defaults with ResponseOverrides = ValueSome overrides })
-        |> should equal """@get('/x',{&quot;responseOverrides&quot;:{&quot;namespace&quot;:&quot;svg&quot;}})"""
-        let overrides = OverrideElements { ElementsOverrides.None with Namespace = ValueSome ResponseOverrideNamespace.MathMl }
-        Ds.get ("/x", { RequestOptions.Defaults with ResponseOverrides = ValueSome overrides })
-        |> should equal """@get('/x',{&quot;responseOverrides&quot;:{&quot;namespace&quot;:&quot;mathml&quot;}})"""
-
-    [<Fact>]
-    let ``RequestOptions ResponseOverrides for signals sets onlyIfMissing`` () =
-        Ds.get ("/x", { RequestOptions.Defaults with ResponseOverrides = ValueSome (OverrideSignals true) })
-        |> should equal """@get('/x',{&quot;responseOverrides&quot;:{&quot;onlyIfMissing&quot;:true}})"""
-

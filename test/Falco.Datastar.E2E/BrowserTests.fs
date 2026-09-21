@@ -33,10 +33,13 @@ type BrowserTests(browser:BrowserFixture) =
         let times = Site.retryAttempts.ToArray()
         times.Length |> should equal 5
         let gaps = times |> Array.pairwise |> Array.map (fun (before, after) -> (after - before).TotalMilliseconds)
-        // The wait starts at 100 ms and grows by 10 times each time. Without RetryMaxWait the second wait would be 1000 ms
+        // The wait starts at 100 ms and grows by 10 times each time. Without RetryMaxWait the second wait would be 1000 ms.
+        // With RetryMaxWait of 300 ms, the waits after the first are 300 ms, and a request takes a little time on top of that.
         gaps.[0] |> should be (greaterThan 80.0)
-        gaps |> Array.iter (fun gap -> gap |> should be (lessThan 600.0))
-        gaps.[1] |> should be (greaterThan 250.0)
+        gaps.[0] |> should be (lessThan 250.0)
+        for gap in gaps |> Array.skip 1 do
+            gap |> should be (greaterThan 250.0)
+            gap |> should be (lessThan 450.0)
     }
 
     [<Fact>]
@@ -124,14 +127,9 @@ type BrowserTests(browser:BrowserFixture) =
         let! page, _ = openPage "/typed"
         do! page.ClickAsync "#inc"
         do! page.ClickAsync "#send"
-        do! expect(page.Locator "#saved").ToContainTextAsync "signals="
-        let! saved = page.Locator("#saved").InnerTextAsync()
-        saved |> should haveSubstring "\"name\":\"Ada\""
-        saved |> should not' (haveSubstring "count")
-        saved |> should not' (haveSubstring "menuOpen")
-        // The apostrophe and the ampersand in the URL arrived as they were written
-        saved |> should haveSubstring "note=it's"
-        saved |> should haveSubstring "b=2"
+        // Only the server signal is sent. The signals that start with an underscore (count, menuOpen, loading and double) stay in the browser.
+        // The apostrophe and the ampersand in the URL arrived as they were written.
+        do! expect(page.Locator "#saved").ToHaveTextAsync """signals={"form":{"name":"Ada"}} note=it's b=2"""
     }
 
     [<Fact>]
@@ -162,10 +160,76 @@ type BrowserTests(browser:BrowserFixture) =
     }
 
     [<Fact>]
-    member _.``The same page without Ds.nonce does not run, which is why the nonce is needed`` () = task {
-        let! page, _ = openPage "/csp-without-nonce"
-        do! Task.Delay 1500
+    member _.``The same page without Ds.nonce is stopped by the policy, which is why the nonce is needed`` () = task {
+        let! page = browser.NewPageAsync()
+        let messages = ResizeArray<string>()
+        page.Console.Add(fun message -> lock messages (fun () -> messages.Add message.Text))
+        let! _ = page.GotoAsync (browser.BaseUrl + "/csp-without-nonce")
+        // Datastar loaded, and the browser refused the string of JavaScript that it tried to run
+        let deadline = DateTime.UtcNow.AddSeconds 10.0
+        let refused () = lock messages (fun () -> messages |> Seq.exists (fun message -> message.Contains "unsafe-eval"))
+        while not (refused ()) && DateTime.UtcNow < deadline do
+            do! Task.Delay 100
+        refused () |> should equal true
         do! expect(page.Locator "#n").ToHaveTextAsync ""
+    }
+
+    [<Fact>]
+    member _.``A rocket template chain shows one branch, and changes when the signal does`` () = task {
+        let! page, _ = openPage "/typed"
+        do! expect(page.Locator "#t1-step").ToHaveTextAsync "step two"
+        do! page.ClickAsync "#t1-first"
+        do! expect(page.Locator "#t1-step").ToHaveTextAsync "step one"
+        do! expect(page.Locator "#t2-step").ToHaveTextAsync "step two"
+    }
+
+    [<Fact>]
+    member _.``FilterSignals sends the signals that match, and never the ones that stay in the browser`` () = task {
+        let! page, _ = openPage "/filter"
+        do! page.ClickAsync "#only-form"
+        do! expect(page.Locator "#saved").ToHaveTextAsync """signals={"form":{"name":"Ada"}} header="""
+        // An exclude of its own would replace Datastar's rule for underscore signals, so the library adds the rule to it
+        do! page.ClickAsync "#not-secret"
+        do! expect(page.Locator "#saved").ToHaveTextAsync """signals={"form":{"name":"Ada"},"other":{"note":"x"}} header="""
+    }
+
+    [<Fact>]
+    member _.``Headers in the request options reach the server as they were written`` () = task {
+        let! page, _ = openPage "/filter"
+        do! page.ClickAsync "#with-header"
+        do! expect(page.Locator "#saved").ToContainTextAsync "header=it's <b>hello</b>"
+    }
+
+    [<Fact>]
+    member _.``An AbortController in the request options cancels the request when it is aborted`` () = task {
+        Site.slowRequests.Clear()
+        let! page, _ = openPage "/abort"
+        do! page.ClickAsync "#slow"
+        let waitFor (what:string) = task {
+            let deadline = DateTime.UtcNow.AddSeconds 8.0
+            while not (Site.slowRequests.ToArray() |> Array.contains what) && DateTime.UtcNow < deadline do
+                do! Task.Delay 50
+        }
+        do! waitFor "started"
+        do! page.ClickAsync "#abort"
+        do! waitFor "aborted"
+        Site.slowRequests.ToArray() |> should equal [| "started"; "aborted" |]
+    }
+
+    [<Fact>]
+    member _.``Text in a string helper stays text, a template literal is evaluated, and an action name in a string is not run`` () = task {
+        let! page, _ = openPage "/strings"
+        do! expect(page.Locator "#quoted").ToHaveTextAsync "Hello $name"
+        do! expect(page.Locator "#concatenated").ToHaveTextAsync "Hello Ada"
+        do! expect(page.Locator "#template").ToHaveTextAsync "Hello Ada"
+        do! expect(page.Locator "#action").ToHaveTextAsync "call @get(x) and $$y"
+    }
+
+    [<Fact>]
+    member _.``Each Rocket prop helper writes what the codec of the same type reads`` () = task {
+        let! page, errors = openPage "/props"
+        do! expect(page.Locator "#read").ToHaveTextAsync """{"label":"it's <b>x</b> & \"q\"","maxCount":2.5,"open":true,"when":"2026-09-21T12:30:00.000Z","settings":{"firstName":"Ada","tags":["a","b"]},"payload":[1,2,255]}"""
+        errors |> Seq.toList |> should be Empty
     }
 
 /// The example is started once for the tests in this class, and the browser is shared with the other tests

@@ -74,6 +74,14 @@ module internal ExampleHost =
 type ExampleFixture() =
     let mutable started : Process = null
     let mutable baseUrl = ""
+    // The last lines that the example wrote, for the message when it does not start
+    let output = System.Collections.Generic.Queue<string>()
+    let remember (line:string) =
+        if not (isNull line) then
+            lock output (fun () ->
+                output.Enqueue line
+                if output.Count > 40 then output.Dequeue() |> ignore)
+    let lastOutput () = lock output (fun () -> String.Join("\n", output))
 
     member _.BaseUrl = baseUrl
 
@@ -88,9 +96,9 @@ type ExampleFixture() =
             info.RedirectStandardOutput <- true
             info.RedirectStandardError <- true
             started <- Process.Start info
-            // Nobody reads the output, and a full pipe would stop the app
-            started.OutputDataReceived.Add ignore
-            started.ErrorDataReceived.Add ignore
+            // A full pipe would stop the app, so the output is always read. The last lines go into the message when the app does not start.
+            started.OutputDataReceived.Add(fun data -> remember data.Data)
+            started.ErrorDataReceived.Add(fun data -> remember data.Data)
             started.BeginOutputReadLine()
             started.BeginErrorReadLine()
 
@@ -98,8 +106,8 @@ type ExampleFixture() =
             let deadline = DateTime.UtcNow.AddMinutes 3.0
             let mutable ready = false
             while not ready do
-                if started.HasExited then failwith $"The RocketComponents example stopped with exit code {started.ExitCode} before it answered"
-                if DateTime.UtcNow > deadline then failwith "The RocketComponents example did not answer within 3 minutes"
+                if started.HasExited then failwith $"The RocketComponents example stopped with exit code {started.ExitCode} before it answered. What it wrote last:\n{lastOutput ()}"
+                if DateTime.UtcNow > deadline then failwith $"The RocketComponents example did not answer within 3 minutes. What it wrote last:\n{lastOutput ()}"
                 try
                     let! response = client.GetAsync baseUrl
                     ready <- response.IsSuccessStatusCode

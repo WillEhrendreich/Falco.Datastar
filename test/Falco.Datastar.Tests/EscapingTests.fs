@@ -47,16 +47,25 @@ module EscapingTests =
         Assert.Throws<ArgumentException>(fun () -> Ds.nonce "   " |> ignore) |> ignore
 
     [<Fact>]
-    let ``Ds.bindEvent needs at least one event, because Datastar would never sync an empty list`` () =
+    let ``Ds.bindEvent writes the first event and the others after it`` () =
         renderAttr (Ds.bindEvent (SignalPath.sp "val", "input"))
         |> should equal """<div data-bind:val__event.input></div>"""
         renderAttr (Ds.bindEvent (SignalPath.sp "val", "input", [ "change" ]))
         |> should equal """<div data-bind:val__event.input.change></div>"""
 
     [<Fact>]
-    let ``Ds.bindEvent and Ds.bindProp refuse an empty name`` () =
-        Assert.Throws<ArgumentException>(fun () -> Ds.bindEvent (SignalPath.sp "val", " ") |> ignore) |> ignore
-        Assert.Throws<ArgumentException>(fun () -> Ds.bindProp (SignalPath.sp "val", "") |> ignore) |> ignore
+    let ``Ds.bindEvent and Ds.bindProp refuse an empty name, and say what to write`` () =
+        let noEvent = Assert.Throws<ArgumentException>(fun () -> Ds.bindEvent (SignalPath.sp "val", " ") |> ignore)
+        noEvent.Message |> should startWith "Ds.bindEvent needs an event name, such as \"input\". With no events Datastar never syncs the signal."
+        let noProp = Assert.Throws<ArgumentException>(fun () -> Ds.bindProp (SignalPath.sp "val", "") |> ignore)
+        noProp.Message |> should startWith "Ds.bindProp needs the name of an element property, such as \"checked\". An empty name makes Datastar throw BindPropNameMissing."
+        let emptyEvent = Assert.Throws<ArgumentException>(fun () -> Ds.bindProp (SignalPath.sp "val", "checked", [ "input"; "" ]) |> ignore)
+        emptyEvent.Message |> should startWith "Ds.bindProp was given an empty event name. Datastar listens for each name that follows __event, so an empty one listens for nothing."
+
+    [<Fact>]
+    let ``Ds.bindProp with an empty list of events writes no event modifier, so Datastar uses the default events`` () =
+        renderAttr (Ds.bindProp (SignalPath.sp "val", "checked", []))
+        |> should equal """<div data-bind:val__prop.checked></div>"""
 
     // The escaping has a fast path for text that needs none. This compares it with the plain chain of replacements it stands in for.
     [<Fact>]
@@ -70,6 +79,49 @@ module EscapingTests =
             let text = String(Array.init (random.Next(0, 24)) (fun _ -> alphabet.[random.Next alphabet.Length]))
             Expr.toString (Expr.string text) |> should equal ("'" + reference text + "'")
             Ds.get text |> should equal ("@get('" + reference text + "')")
+
+    /// What a browser does with the text of an attribute, and then what a JavaScript parser does with a single-quoted string literal in it
+    let private readBack (attributeValue:string) =
+        let literal = Web.HttpUtility.HtmlDecode attributeValue
+        let body = literal.Substring(1, literal.Length - 2)
+        let text = Text.StringBuilder()
+        let mutable index = 0
+        while index < body.Length do
+            match body.[index] with
+            | '\\' ->
+                text.Append(match body.[index + 1] with | 'n' -> '\n' | 'r' -> '\r' | other -> other) |> ignore
+                index <- index + 2
+            | '\'' -> failwith $"an unescaped quote ends the string early in {literal}"
+            | '\n' | '\r' -> failwith $"a raw line break is not allowed in a string literal in {literal}"
+            | other ->
+                text.Append other |> ignore
+                index <- index + 1
+        text.ToString()
+
+    [<Fact>]
+    let ``Text that goes through the escaping is read back as the same text by a browser and a JavaScript parser`` () =
+        let alphabet = [| 'a'; 'Z'; '0'; ' '; '\t'; '/'; '='; '\\'; '\''; '\n'; '\r'; '&'; '<'; '>'; '"'; '$'; '@'; ';'; '\u2028'; 'é'; '#'; '%'; '`' |]
+        let random = Random 11
+        for _ in 1 .. 5000 do
+            let text = String(Array.init (random.Next(0, 30)) (fun _ -> alphabet.[random.Next alphabet.Length]))
+            let rendered = renderAttr (Ds.text (Expr.string text))
+            // <div data-text="VALUE"></div>
+            let value = rendered.Substring("<div data-text=\"".Length, rendered.Length - "<div data-text=\"".Length - "\"></div>".Length)
+            value |> should not' (contain '"')
+            value |> should not' (contain '<')
+            value |> should not' (contain '>')
+            readBack value |> should equal text
+
+    [<Fact>]
+    let ``A URL goes through the same escaping, so a browser reads it back as written`` () =
+        let random = Random 12
+        let alphabet = [| 'a'; '/'; '?'; '='; '&'; '\''; '"'; '<'; ')'; '\\'; ' ' |]
+        for _ in 1 .. 2000 do
+            let url = String(Array.init (random.Next(1, 20)) (fun _ -> alphabet.[random.Next alphabet.Length]))
+            let action = Ds.get url
+            // @get('URL')
+            let literal = action.Substring("@get(".Length, action.Length - "@get(".Length - ")".Length)
+            readBack literal |> should equal url
 
     // Signals filters are regular expressions inside a JavaScript object literal, inside an attribute
 

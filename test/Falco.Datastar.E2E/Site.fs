@@ -107,11 +107,16 @@ let private loading = Signal.browser<bool> "loading"
 let private formName = Signal.server<string> "form.name"
 let private isOn = Signal.rocket<bool> "on"
 let private items = Signal.rocket<string list> "items"
+let private step = Signal.rocket<int> "step"
 
 let private typedBox (id':string) =
     Elem.create "typed-box" [ Attr.id id' ] [
-        Elem.div [ Ds.signal (isOn, false); Ds.signal (items, [ "a"; "b" ]) ] []
+        Elem.div [ Ds.signal (isOn, false); Ds.signal (items, [ "a"; "b" ]); Ds.signal (step, 2) ] []
         Elem.button [ Attr.id $"{id'}-toggle"; Ds.onClick (Stmt.toggle isOn) ] [ Text.raw "toggle" ]
+        Elem.button [ Attr.id $"{id'}-first"; Ds.onClick (Stmt.set step (Expr.int 1)) ] [ Text.raw "first" ]
+        Rocket.templateIf (Expr.equal (Expr.read step) (Expr.int 1), [ Elem.p [ Attr.id $"{id'}-step" ] [ Text.raw "step one" ] ])
+        Rocket.templateElseIf (Expr.equal (Expr.read step) (Expr.int 2), [ Elem.p [ Attr.id $"{id'}-step" ] [ Text.raw "step two" ] ])
+        Rocket.templateElse [ Elem.p [ Attr.id $"{id'}-step" ] [ Text.raw "another step" ] ]
         Elem.span [ Attr.id $"{id'}-state"; Ds.text (Expr.ifElse (Expr.read isOn) (Expr.string "on") (Expr.string "off")) ] []
         Elem.ul [ Attr.id $"{id'}-rows" ] [
             Rocket.forEach (Expr.read items, fun item index -> [ Elem.li [ Ds.text (Expr.concat [ Expr.toText index; Expr.string ":"; item ]) ] [] ]) ]
@@ -179,6 +184,80 @@ let private cspPage (withNonce:bool) : HttpHandler = fun ctx ->
             Elem.body [ Ds.signal (sp "n", 7) ] [ Elem.span [ Attr.id "n"; Ds.text "$n" ] [] ] ]
     Response.ofHtml document ctx
 
+// What Datastar sends with a request: the signals it filters, and the headers
+let private filterPage =
+    let postWith (options:RequestOptions) = Ds.onClick (Stmt.postWith "/filter-save" options)
+    page "filter"
+        [ Elem.div [ Ds.signal (Signal.server<string> "form.name", "Ada"); Ds.signal (Signal.server<string> "other.note", "x")
+                     Ds.signal (Signal.server<string> "secret.key", "k"); Ds.signal (Signal.browser<string> "draft", "d") ] [
+              Elem.button [ Attr.id "only-form"; postWith { RequestOptions.Defaults with FilterSignals = SignalsFilter.Prefix "form." } ] [ Text.raw "only form" ]
+              Elem.button [ Attr.id "not-secret"; postWith { RequestOptions.Defaults with FilterSignals = SignalsFilter.Exclude "^secret" } ] [ Text.raw "not secret" ]
+              Elem.button [ Attr.id "with-header"; postWith { RequestOptions.Defaults with Headers = [ "X-Test", "it's <b>hello</b>" ] } ] [ Text.raw "with header" ]
+              Elem.pre [ Attr.id "saved" ] [ Text.raw "not saved" ] ] ] []
+
+let private filterSave : HttpHandler = fun ctx -> task {
+    use! signals = Request.getSignalsJson ctx
+    let header = string ctx.Request.Headers["X-Test"]
+    let text = $"signals={signals.RootElement.GetRawText()} header={header}"
+    // The header has markup in it on purpose, so it is written as text
+    return! Response.ofHtmlElements (Elem.pre [ Attr.id "saved" ] [ Text.enc text ]) ctx
+}
+
+// requestCancellation: an AbortController in a signal. Datastar only cancels the request when it is given the controller itself.
+let slowRequests = ConcurrentQueue<string>()
+
+let private abortPage =
+    page "abort"
+        [ Elem.div [ Attr.create "data-signals:_controller" "new AbortController()" ] [
+              Elem.button [ Attr.id "slow"; Ds.onClick (Stmt.getWith "/slow" { RequestOptions.Defaults with RequestCancellation = AbortController "$_controller" }) ] [ Text.raw "slow" ]
+              Elem.button [ Attr.id "abort"; Ds.onClick (Stmt.unsafeRaw "$_controller.abort()") ] [ Text.raw "abort" ] ] ] []
+
+let private slow : HttpHandler = fun ctx -> task {
+    slowRequests.Enqueue "started"
+    try
+        do! System.Threading.Tasks.Task.Delay(10000, ctx.RequestAborted)
+        slowRequests.Enqueue "finished"
+    with :? OperationCanceledException -> slowRequests.Enqueue "aborted"
+}
+
+// Strings in a string helper: text stays text, a template literal is evaluated, and an action name inside a string is not run
+let private stringsPage =
+    page "strings"
+        [ Elem.div [ Ds.signal (sp "name", "Ada") ] [
+              Elem.span [ Attr.id "quoted"; Ds.text "'Hello $name'" ] []
+              Elem.span [ Attr.id "concatenated"; Ds.text "'Hello ' + $name" ] []
+              Elem.span [ Attr.id "template"; Ds.text "`Hello ${$name}`" ] []
+              Elem.span [ Attr.id "action"; Ds.text "'call @get(x) and $$y'" ] [] ] ] []
+
+// Rocket props: each helper writes what the codec of the same type reads
+let private propBoxScript = """
+rocket('prop-box', {
+  mode: 'light',
+  props: ({ string, number, bool, date, json, bin }) => ({
+    label: string.default('none'),
+    maxCount: number.default(0),
+    open: bool,
+    when: date,
+    settings: json.default({}),
+    payload: bin,
+  }),
+  render: ({ html, props }) => html`<output id="read">${JSON.stringify({
+    label: props.label, maxCount: props.maxCount, open: props.open,
+    when: props.when.toISOString(), settings: props.settings, payload: Array.from(props.payload) })}</output>`,
+})
+"""
+
+let private propsPage =
+    page "props"
+        [ Elem.create "prop-box" [
+              Rocket.propString ("label", "it's <b>x</b> & \"q\"")
+              Rocket.propNumber ("maxCount", 2.5)
+              Rocket.propBool ("open", true)
+              Rocket.propDate ("when", DateTimeOffset(2026, 9, 21, 12, 30, 0, TimeSpan.Zero))
+              Rocket.propJson ("settings", {| firstName = "Ada"; tags = [ "a"; "b" ] |})
+              Rocket.propBin ("payload", [| 1uy; 2uy; 255uy |]) ] [] ]
+        [ moduleScript propBoxScript ]
+
 let endpoints =
     [ get "/retry" retryPage
       get "/retry-target" retryTarget
@@ -193,4 +272,10 @@ let endpoints =
       delete "/item" (itemAnswer "DELETE")
       post "/item" (itemAnswer "POST")
       get "/csp" (cspPage true)
-      get "/csp-without-nonce" (cspPage false) ]
+      get "/csp-without-nonce" (cspPage false)
+      get "/filter" filterPage
+      post "/filter-save" filterSave
+      get "/abort" abortPage
+      get "/slow" slow
+      get "/strings" stringsPage
+      get "/props" propsPage ]

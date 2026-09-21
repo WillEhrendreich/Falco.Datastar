@@ -780,6 +780,29 @@ Will send a command to client Datastar to remove fragments with the matching sel
 Response.ofRemoveElements [ sel"hello" ]
 ```
 
+### Patch options
+
+`Response.ofHtmlElementsOptions` and `Response.ofHtmlStringElementsOptions` take a `PatchElementsOptions`, which sets where and how the elements are patched. Start from `PatchElementsOptions.Defaults`.
+
+| Field | What it does |
+| --- | --- |
+| `Selector` | The element to patch. Without it, each new element replaces the page element with the same `id`. |
+| `PatchMode` | How to patch: `Outer` (the default), `Inner`, `Remove`, `Replace`, `Prepend`, `Append`, `Before` or `After`. |
+| `UseViewTransition` | Runs the patch inside a view transition. |
+| `ViewTransitionSelector` | With `UseViewTransition`, runs the transition on the first element that matches this selector instead of on the whole document. If nothing matches, the document is used. |
+| `Namespace` | The namespace the new elements are created in: `Html` (the default), `Svg` or `MathMl`. |
+
+```fsharp
+let appendRows =
+    { PatchElementsOptions.Defaults with
+        Selector = ValueSome "#rows"
+        PatchMode = Append
+        UseViewTransition = true
+        ViewTransitionSelector = ValueSome "#table" }
+
+Response.ofHtmlElementsOptions appendRows (Elem.tr [] [ Elem.td [] [ Text.raw "New row" ] ])
+```
+
 ## _Streaming Server Side Events_
 
 Within the `Response` module there are the `of` methods that are for sending single server side events and then closing the connection.
@@ -810,7 +833,7 @@ See the [Streaming example](examples/Streaming) for more.
 
 ## Upgrading
 
-This section covers upgrading to version 1.4.0 from version 1.3.0 or earlier. It lists what can stop your code compiling, what can produce warnings, and what changes the output without any compiler message.
+This section covers upgrading to version 1.4.0 from version 1.3.0 or earlier. It lists what can stop your code compiling, what can produce warnings, what can clash with your own names, what changes the output without any compiler message, and what changes in your dependencies.
 
 ### Changes that stop your code compiling
 
@@ -857,13 +880,28 @@ A module or type of your own called `Rocket` does not clash.
 They now write `@setAll(true, { include: /^foo\./ })` and `@toggleAll({ include: /^foo\./ })`. Your code needs no change, but tests that compare the generated text need new expected values.
 Numbers are now written as numbers: `Ds.setAll ("foo.", 5)` used to write `'5'`, which is text, and now writes `5`. If you want text, pass a string.
 
+**`RequestOptions.Retry`.** It used to be ignored, because the library never wrote it. `Retry = OnError`, `OnAlways` and `OnNever` now take effect, so if your code sets one of them, the retry behaviour of that request changes.
+
+**`RequestOptions.RetryMaxWait`.** It was written as `retryMaxWaitMs`. Datastar stopped reading that name in 1.0.0 (RC.8 and earlier read it), so the setting was ignored. It is now written as `retryMaxWait`, which Datastar 1.0.4 reads.
+
 **`ContentType = CustomJson obj`.** It used to send an option called `override`, which Datastar does not have, so Datastar ignored it and sent the signals as usual.
 It now sends your object as the request body. If your server code expects the signals, change it to expect your object, or stop using `CustomJson`.
 
 **`Ds.cdnSrc` and `Ds.cdnScript`.** They now load Datastar 1.0.4. They loaded 1.0.0-RC.7 before, so your pages move across several Datastar releases.
 This library does not list every change in Datastar itself. Read the [Datastar release notes](https://github.com/starfederation/datastar/releases) before you deploy.
-To stay on the old script for now, write the tag yourself. Note that `Ds.query` and `RequestCancellation = Cleanup` need the newer script.
+To stay on the old script for now, write the tag yourself. Note that `Ds.query`, `RequestCancellation = Cleanup` and `RequestOptions.RetryMaxWait` need the newer script.
 
 ```fsharp
 Elem.script [ Attr.type' "module"; Attr.src "https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0-RC.7/bundles/datastar.js" ] []
 ```
+
+### Changes to your dependencies
+
+`Falco.Datastar` now depends on `StarFederation.Datastar.FSharp` 1.4.0. It depended on 1.2.0. Your project picks up the new version by itself, and three things change.
+
+Reading signals for a `@delete` now works. Datastar sends them in the query string, and versions 1.2.0 and 1.2.1 of the SDK only looked in the body, so `Request.getSignals` and `Request.getSignalsJson` came back empty for a `@delete`. If you worked around this by reading the query string yourself, you can remove the workaround.
+
+If your own project references `StarFederation.Datastar.FSharp` directly at a version below 1.3.0, NuGet only warns (`NU1605`, "Detected package downgrade") and uses your older version, and the `@delete` problem comes back. Raise that reference to 1.4.0, or remove it.
+
+`PatchElementsOptions` has a new field, `ViewTransitionSelector`, for scoped view transitions. `PatchElementsOptions.Defaults with ...` needs no change, but code that calls the constructor must pass the new argument.
+Everything the SDK sends is otherwise the same as before.

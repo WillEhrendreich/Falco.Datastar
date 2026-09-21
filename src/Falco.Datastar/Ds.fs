@@ -48,14 +48,11 @@ type Ds =
     /// <param name="signalValue">The initial value to set the signal</param>
     /// <param name="ifMissing">Signal is only merged if it doesn't already exist</param>
     /// <returns>Attribute</returns>
-    static member inline signal<'T> (signalPath:SignalPath, signalValue:'T, ?ifMissing) =
+    static member signal<'T> (signalPath:SignalPath, signalValue:'T, ?ifMissing) =
         DsAttr.start "signals"
         |> DsAttr.addSignalPathTarget signalPath
         |> DsAttr.addModifierNameIf "ifmissing" (defaultArg ifMissing false)
-        |> DsAttr.addValue (
-            match typeof<'T> with
-            | t when t = typeof<string> -> "'" + signalValue.ToString() + "'"
-            | _ -> JsonValue.Create<'T>(signalValue).ToJsonString())
+        |> DsAttr.addValue (Js.literal signalValue)
         |> DsAttr.create
 
     /// <summary>
@@ -104,6 +101,8 @@ type Ds =
     /// <param name="events">The events that copy the property into the signal. If you leave this out, Datastar uses the element's default events</param>
     /// <returns>Attribute</returns>
     static member bindProp (signalPath:SignalPath, propName:string, ?events:string list) =
+        propName |> Guard.notBlank "propName" "Ds.bindProp needs the name of an element property, such as \"checked\". An empty name makes Datastar throw BindPropNameMissing."
+        events |> Option.iter (List.iter (Guard.notBlank "events" "Ds.bindProp cannot list an empty event name."))
         DsAttr.start "bind"
         |> DsAttr.addTarget (signalPath |> SignalPath.kebabValue)
         |> DsAttr.addModifierOption (events |> Option.filter (List.isEmpty >> not) |> Option.map (fun names -> { Name = "event"; Tags = names }) |> Option.toValueOption)
@@ -116,9 +115,12 @@ type Ds =
     /// https://data-star.dev/reference/attributes#data-bind
     /// </summary>
     /// <param name="signalPath">The signal to bind to</param>
-    /// <param name="events">The events that copy the element's value into the signal, e.g. [ "input"; "change" ]</param>
+    /// <param name="firstEvent">An event that copies the element's value into the signal, e.g. "input". At least one is needed, because with none Datastar never syncs the signal</param>
+    /// <param name="otherEvents">More events, e.g. [ "change" ]</param>
     /// <returns>Attribute</returns>
-    static member bindEvent (signalPath:SignalPath, events:string list) =
+    static member bindEvent (signalPath:SignalPath, firstEvent:string, ?otherEvents:string list) =
+        let events = firstEvent :: defaultArg otherEvents []
+        events |> List.iter (Guard.notBlank "firstEvent" "Ds.bindEvent needs an event name, such as \"input\". With no events Datastar never syncs the signal.")
         DsAttr.start "bind"
         |> DsAttr.addTarget (signalPath |> SignalPath.kebabValue)
         |> DsAttr.addModifier { Name = "event"; Tags = events }
@@ -299,7 +301,7 @@ type Ds =
     /// <param name="expression">The expression to evaluate when the event is triggered; https://data-star.dev/guide/datastar_expressions</param>
     /// <param name="eventModifiers">To modify the behavior of the event</param>
     /// <returns>Attribute</returns>
-    static member onClick (expression, ?eventModifiers) =
+    static member onClick (expression:string, ?eventModifiers) =
         Ds.onEvent ("click", expression, ?eventModifiers = eventModifiers)
 
     /// <summary>
@@ -394,20 +396,8 @@ type Ds =
     /// <summary>
     /// Actions
     /// </summary>
-    static member private backendAction actionOptions action =
-        match (action, actionOptions) with
-        | Get url, ValueNone -> $@"@get('{url}')"
-        | Get url, ValueSome options -> $"@get('{url}',{options |> RequestOptions.Serialize})"
-        | Post url, ValueNone -> $@"@post('{url}')"
-        | Post url, ValueSome options -> $"@post('{url}',{options |> RequestOptions.Serialize})"
-        | Put url, ValueNone -> $@"@put('{url}')"
-        | Put url, ValueSome options -> $"@put('{url}',{options |> RequestOptions.Serialize})"
-        | Patch url, ValueNone -> $@"@patch('{url}')"
-        | Patch url, ValueSome options -> $"@patch('{url}',{options |> RequestOptions.Serialize})"
-        | Delete url, ValueNone -> $@"@delete('{url}')"
-        | Delete url, ValueSome options -> $"@delete('{url}',{options |> RequestOptions.Serialize})"
-        | Query url, ValueNone -> $@"@query('{url}')"
-        | Query url, ValueSome options -> $"@query('{url}',{options |> RequestOptions.Serialize})"
+    static member private backendAction (actionOptions:RequestOptions voption) (action:BackendAction) =
+        BackendActionExpression.render actionOptions action
 
     /// <summary>
     /// Creates a @get action for an expression with options. The action sends a GET request with the given url.
@@ -545,6 +535,176 @@ type Ds =
         | KeyValueAttr (key, value) -> KeyValueAttr (key + modifier, value)
         | NonValueAttr key -> NonValueAttr (key + modifier)
 
+    // Typed versions. They take signals, expressions and statements written in F#, so the compiler checks what the JavaScript strings above cannot:
+    // that a signal exists, that a condition is a boolean, and that a value has the type of its signal.
+
+    /// <summary>
+    /// Bind the content text of the element to an expression.
+    /// https://data-star.dev/reference/attributes#data-text
+    /// </summary>
+    /// <param name="expression">An expression of any type; Datastar shows it as text</param>
+    /// <returns>Attribute</returns>
+    static member text (expression:Expr<'T>) =
+        DsAttr.create ("text", value = Expr.toString expression)
+
+    /// <summary>
+    /// Show or hides an element based on a boolean expression.
+    /// https://data-star.dev/reference/attributes#data-show
+    /// </summary>
+    /// <param name="condition">If it is true the element is visible</param>
+    /// <returns>Attribute</returns>
+    static member show (condition:Expr<bool>) =
+        DsAttr.create ("show", value = Expr.toString condition)
+
+    /// <summary>
+    /// Adds or removes a class from the element based on a boolean expression.
+    /// https://data-star.dev/reference/attributes#data-class
+    /// </summary>
+    /// <param name="className">Name of the class to add or remove</param>
+    /// <param name="condition">If it is true the class is added, otherwise it is removed</param>
+    /// <returns>Attribute</returns>
+    static member class' (className:string, condition:Expr<bool>) =
+        Ds.class' (className, Expr.toString condition)
+
+    /// <summary>
+    /// Bind an element's attribute value to an expression.
+    /// https://data-star.dev/reference/attributes#data-attr
+    /// </summary>
+    /// <param name="attributeName">An HTML element attribute</param>
+    /// <param name="expression">The value to give the attribute</param>
+    /// <returns>Attribute</returns>
+    static member attr' (attributeName:string, expression:Expr<'T>) =
+        Ds.attr' (attributeName, Expr.toString expression)
+
+    /// <summary>
+    /// Sets the value of the inline CSS styles on an element based on an expression
+    /// </summary>
+    /// <param name="styleProperty">The style to set</param>
+    /// <param name="propertyValue">The value to give the style property</param>
+    /// <returns>Attribute</returns>
+    static member style (styleProperty:string, propertyValue:Expr<'T>) =
+        Ds.style (styleProperty, Expr.toString propertyValue)
+
+    /// <summary>
+    /// Creates a signal with a starting value of the signal's type. A text value is escaped.
+    /// A browser signal stays in the browser, and a server signal is sent with requests: see <see cref="SignalScope"/>.
+    /// A Rocket component signal is scoped to the component instance by Rocket when this is inside the component.
+    /// https://data-star.dev/reference/attributes#data-signals
+    /// </summary>
+    /// <param name="signal">The signal to create</param>
+    /// <param name="signalValue">The starting value</param>
+    /// <param name="ifMissing">The signal is only created if it does not exist</param>
+    /// <returns>Attribute</returns>
+    static member signal (signal:Signal<'T>, signalValue:'T, ?ifMissing) =
+        Ds.signal (SignalPath.create (Signal.path signal), signalValue, ?ifMissing = ifMissing)
+
+    /// <summary>
+    /// Creates a read-only signal that is computed from an expression of the signal's type.
+    /// https://data-star.dev/reference/attributes#data-computed
+    /// </summary>
+    /// <param name="signal">The signal to create</param>
+    /// <param name="expression">The expression that gives its value</param>
+    /// <returns>Attribute</returns>
+    static member computed (signal:Signal<'T>, expression:Expr<'T>) =
+        Ds.computed (SignalPath.create (Signal.path signal), Expr.toString expression)
+
+    /// <summary>
+    /// Binds a signal to an element's value.
+    /// https://data-star.dev/reference/attributes#data-bind
+    /// </summary>
+    /// <param name="signal">The signal to bind to. Datastar sends a server signal with requests, which is how a form input reaches the backend</param>
+    /// <returns>Attribute</returns>
+    static member bind (signal:Signal<'T>) =
+        DsAttr.createSp ("bind", SignalPath.create (Signal.path signal))
+
+    /// <summary>
+    /// Creates a boolean signal that is true while a server request is in flight. Place it in the same element as the action that makes the request.
+    /// https://data-star.dev/reference/attributes#data-indicator
+    /// </summary>
+    /// <param name="signal">The signal to create. A browser signal is the right choice, because the server does not need it</param>
+    /// <returns>Attribute</returns>
+    static member indicator (signal:Signal<bool>) =
+        Ds.indicator (SignalPath.create (Signal.path signal))
+
+    /// <summary>
+    /// Attaches an event listener to an element, and runs the statement when the event happens.
+    /// https://data-star.dev/reference/attributes#data-on
+    /// </summary>
+    /// <param name="eventName">The event to listen to</param>
+    /// <param name="statement">What to do when the event happens</param>
+    /// <param name="eventModifiers">To modify the behavior of the event</param>
+    /// <returns>Attribute</returns>
+    static member onEvent (eventName:string, statement:Stmt, ?eventModifiers:OnEventModifier list) =
+        Ds.onEvent (eventName, Stmt.toString statement, ?eventModifiers = eventModifiers)
+
+    /// <summary>
+    /// Adds an on-click listener to the element and runs the statement.
+    /// https://data-star.dev/reference/attributes#data-on
+    /// </summary>
+    /// <param name="statement">What to do when the element is clicked</param>
+    /// <param name="eventModifiers">To modify the behavior of the event</param>
+    /// <returns>Attribute</returns>
+    static member onClick (statement:Stmt, ?eventModifiers:OnEventModifier list) =
+        Ds.onEvent ("click", statement, ?eventModifiers = eventModifiers)
+
+    /// <summary>
+    /// Runs the statement when the element is loaded.
+    /// https://data-star.dev/reference/attributes#data-init
+    /// </summary>
+    /// <param name="statement">What to do</param>
+    /// <param name="delayMs">The time to wait before running it in milliseconds; default = 0</param>
+    /// <param name="viewTransition">Wrap it in document.startViewTransition(); default = false</param>
+    /// <returns>Attribute</returns>
+    static member onInit (statement:Stmt, ?delayMs:int, ?viewTransition:bool) =
+        Ds.onInit (Stmt.toString statement, ?delayMs = delayMs, ?viewTransition = viewTransition)
+
+    /// <summary>
+    /// Runs the statement on page load and whenever any signal it reads changes.
+    /// </summary>
+    /// <param name="statement">What to do</param>
+    /// <returns>Attribute</returns>
+    static member effect (statement:Stmt) =
+        Ds.effect (Stmt.toString statement)
+
+    /// <summary>
+    /// Runs the statement on a steady interval
+    /// </summary>
+    /// <param name="statement">What to do</param>
+    /// <param name="intervalMs">The time between each run</param>
+    /// <param name="leading">Run it first immediately; default = false</param>
+    /// <param name="viewTransition">Wrap it in document.startViewTransition(); default = false</param>
+    /// <returns>Attribute</returns>
+    static member onInterval (statement:Stmt, intervalMs:int, ?leading:bool, ?viewTransition:bool) =
+        Ds.onInterval (Stmt.toString statement, intervalMs, ?leading = leading, ?viewTransition = viewTransition)
+
+    /// <summary>
+    /// Runs the statement when the element intersects with the viewport.
+    /// https://data-star.dev/reference/attributes#data-on-intersect
+    /// </summary>
+    /// <param name="statement">What to do</param>
+    /// <param name="visibility">Sets it to trigger only if the element is exited, or half or fully viewed</param>
+    /// <param name="onlyOnce">Only triggers the event once</param>
+    /// <param name="delayMs">The time to wait before running it in milliseconds; default = 0</param>
+    /// <param name="debounce">Debounce the event listener</param>
+    /// <param name="throttle">Throttle the event listener</param>
+    /// <param name="viewTransition">Wrap it in document.startViewTransition(); default = false</param>
+    /// <param name="threshold">Triggers when the element is visible by a certain percentage (0-100)</param>
+    /// <returns>Attribute</returns>
+    static member onIntersect (statement:Stmt, ?visibility:IntersectsVisibility, ?onlyOnce:bool, ?delayMs:int, ?debounce:Debounce, ?throttle:Throttle, ?viewTransition:bool, ?threshold:int) =
+        Ds.onIntersect (Stmt.toString statement, ?visibility = visibility, ?onlyOnce = onlyOnce, ?delayMs = delayMs, ?debounce = debounce, ?throttle = throttle, ?viewTransition = viewTransition, ?threshold = threshold)
+
+    /// <summary>
+    /// Runs the statement when a signal is changed. Filter using Ds.onSignalPatchFilter
+    /// https://data-star.dev/reference/attributes#data-on-signal-patch
+    /// </summary>
+    /// <param name="statement">What to do</param>
+    /// <param name="delayMs">The time to wait before running it in milliseconds; default = 0</param>
+    /// <param name="debounce">Debounce the event listener</param>
+    /// <param name="throttle">Throttle the event listener</param>
+    /// <returns>Attribute</returns>
+    static member onSignalPatch (statement:Stmt, ?delayMs:int, ?debounce:Debounce, ?throttle:Throttle) =
+        Ds.onSignalPatch (Stmt.toString statement, ?delayMs = delayMs, ?debounce = debounce, ?throttle = throttle)
+
     /// <summary>
     /// Gives Datastar the nonce of your Content Security Policy, so that it works on a page whose policy does not allow unsafe-eval.
     /// Put it on the &lt;html&gt; element. Datastar reads it once and then removes the attribute.
@@ -555,6 +715,7 @@ type Ds =
     /// <param name="nonce">The nonce for this response. Generate a new one for every response</param>
     /// <returns>Attribute</returns>
     static member nonce (nonce:string) =
+        nonce |> Guard.notBlank "nonce" "Ds.nonce needs a nonce that is not empty. When Datastar loads with an empty data-nonce it throws NonceRequired, and then none of Datastar works. Generate a new random value for every response."
         DsAttr.create ("nonce", value = Js.attrEncode nonce)
 
     /// <summary>

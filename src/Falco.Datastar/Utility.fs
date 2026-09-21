@@ -1,6 +1,7 @@
 namespace Falco.Datastar
 
 open System
+open System.Globalization
 open System.Text
 open System.Text.RegularExpressions
 
@@ -44,11 +45,27 @@ module internal Js =
     /// camelCase names, to match the JavaScript objects Rocket props are read into. This is one shared instance, because creating options on every call is slow.
     let webJsonOptions = System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)
 
-    /// Strings become single-quoted literals. Everything else is written as JSON (true, 5, 1.5, null)
+    /// A JavaScript number. NaN and the infinities are literals in JavaScript, so this never raises, and it always uses a dot.
+    let number (value:float) =
+        match Double.IsNaN value, Double.IsPositiveInfinity value, Double.IsNegativeInfinity value with
+        | true, _, _ -> "NaN"
+        | _, true, _ -> "Infinity"
+        | _, _, true -> "-Infinity"
+        | _ -> value.ToString("R", CultureInfo.InvariantCulture)
+
+    /// Strings become single-quoted literals. Numbers, including NaN and the infinities, and booleans are written as they are. Everything else is written as JSON
     let literal<'T> (value:'T) =
         match box value with
         | :? string as text -> stringLiteral text
+        | :? float as decimalNumber -> number decimalNumber
+        | :? float32 as singleNumber when Single.IsFinite singleNumber -> singleNumber.ToString("R", CultureInfo.InvariantCulture)
+        | :? float32 as singleNumber -> number (float singleNumber)
         | _ -> System.Text.Json.JsonSerializer.Serialize<'T>(value) |> attrEncode
+
+/// Refuses input that Datastar cannot use, with a message that says what to do
+module internal Guard =
+    let notBlank (parameter:string) (message:string) (value:string) =
+        if String.IsNullOrWhiteSpace value then raise (ArgumentException(message, parameter))
 
 module internal Bool =
     let inline eitherOr trueThing falseThing bool =

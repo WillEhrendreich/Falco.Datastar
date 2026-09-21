@@ -156,7 +156,7 @@ module DsTests =
 
     [<Fact>]
     let ``Ds.bindEvent lists the events`` () =
-        renderAttr (Ds.bindEvent (SignalPath.sp "val", [ "input"; "change" ]))
+        renderAttr (Ds.bindEvent (SignalPath.sp "val", "input", [ "change" ]))
         |> should equal """<div data-bind:val__event.input.change></div>"""
 
     // The __case modifier changes the casing of the name an attribute creates (bind, class, computed, indicator, on, ref, signals)

@@ -12,6 +12,8 @@
     <Compile Include="RocketTests.fs" />
     <Compile Include="RequestTests.fs" />
     <Compile Include="RocketManifestTests.fs" />
+    <Compile Include="ExprTests.fs" />
+    <Compile Include="EscapingTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 

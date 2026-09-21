@@ -154,6 +154,42 @@ type Rocket =
     static member templateElse (children:XmlNode list) =
         Elem.template [ Attr.createBool "data-else" ] children
 
+    /// <summary>
+    /// Renders the children only while the condition is true. This is <see cref="templateIf"/> with a boolean expression.
+    /// </summary>
+    /// <param name="condition">A boolean expression, e.g. <c>Expr.read (Signal.rocket&lt;bool&gt; "on")</c></param>
+    /// <param name="children">The content to render</param>
+    /// <returns>Element</returns>
+    static member templateIf (condition:Expr<bool>, children:XmlNode list) =
+        Rocket.templateIf (Expr.toString condition, children)
+
+    /// <summary>
+    /// The next branch of a chain. This is <see cref="templateElseIf"/> with a boolean expression.
+    /// </summary>
+    /// <param name="condition">A boolean expression</param>
+    /// <param name="children">The content to render</param>
+    /// <returns>Element</returns>
+    static member templateElseIf (condition:Expr<bool>, children:XmlNode list) =
+        Rocket.templateElseIf (Expr.toString condition, children)
+
+    /// <summary>
+    /// Repeats a row once for each item in a list. The function that builds the row receives the item and the index as typed expressions,
+    /// so the row cannot refer to a name that the loop does not define.
+    /// Rocket calls the item <c>item</c> and the index <c>i</c> unless you pass other names.
+    /// Rocket runs the directive on the server-rendered children of a light-DOM component when the page loads. In an open or closed shadow-DOM component it only runs for children that a later server patch sends.
+    /// </summary>
+    /// <param name="source">An expression that gives the list, e.g. <c>Expr.read (Signal.rocket&lt;string list&gt; "items")</c></param>
+    /// <param name="row">Builds the content of one row from the item and the index</param>
+    /// <param name="itemName">The name for the item; it must be a JavaScript identifier</param>
+    /// <param name="indexName">The name for the index; it must be a JavaScript identifier</param>
+    /// <returns>Element</returns>
+    static member forEach (source:Expr<'T list>, row:Expr<'T> -> Expr<int> -> XmlNode list, ?itemName:string, ?indexName:string) =
+        itemName |> Option.iter (Guard.notBlank "itemName" "Rocket.forEach needs an item name that is a JavaScript identifier, such as \"entry\".")
+        indexName |> Option.iter (Guard.notBlank "indexName" "Rocket.forEach needs an index name that is a JavaScript identifier, such as \"n\".")
+        let item = Expr.unsafeRaw<'T> (defaultArg itemName "item")
+        let index = Expr.unsafeRaw<int> (defaultArg indexName "i")
+        Rocket.templateFor (Expr.toString source, row item index, ?item = itemName, ?index = indexName)
+
 /// <summary>
 /// Reads the document that Rocket's <c>publishRocketManifests</c> posts to your server: one entry for every component the page defined,
 /// with its props (from their codecs), slots and events. A docs build or a component registry can store it.

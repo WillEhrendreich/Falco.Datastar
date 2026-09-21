@@ -159,6 +159,18 @@ module DsTests =
         renderAttr (Ds.bindEvent (SignalPath.sp "val", [ "input"; "change" ]))
         |> should equal """<div data-bind:val__event.input.change></div>"""
 
+    // Content Security Policy: Datastar reads data-nonce from the <html> element (csp.ts)
+
+    [<Fact>]
+    let ``Ds.nonce writes data-nonce`` () =
+        renderAttr (Ds.nonce "r4nd0m")
+        |> should equal """<div data-nonce="r4nd0m"></div>"""
+
+    [<Fact>]
+    let ``Ds.nonce escapes the value so it cannot break out of the attribute`` () =
+        renderAttr (Ds.nonce "a\"b")
+        |> should equal """<div data-nonce="a&quot;b"></div>"""
+
     // data-on target and fetch options
 
     [<Fact>]

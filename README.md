@@ -145,6 +145,7 @@ Some important notes: Signals defined later in the DOM tree override those defin
 - [data-indicator](#dsindicator--data-indicator)
 - [data-json-signals](#dssignals--dssignal--data-signals)
 - [data-init](#dsinit--data-init)
+- [data-nonce](#dsnonce--data-nonce)
 - [data-on](#dsonevent--data-on)
 - [data-on-intersect](#dsonintersect--data-on-intersect)
 - [data-on-interval](#dsoninterval--data-on-interval)
@@ -515,6 +516,25 @@ Evaluates an expression without subscribing to the signals it reads. Use it in `
 
 ```fsharp
 Elem.div [ Ds.effect $"""$last = {Ds.peek "$count"}""" ] []
+```
+
+### [Ds.nonce : `data-nonce`](https://github.com/starfederation/datastar/blob/v1.0.4/library/src/engine/csp.ts)
+
+Datastar runs the expressions in your `data-*` attributes with `Function`, which a Content Security Policy blocks unless the policy allows `unsafe-eval`.
+If your policy uses a nonce instead, put `Ds.nonce` on the `<html>` element. Datastar then runs its expressions through script tags that carry the nonce.
+Without it, a page under such a policy fails with `EvalError: Evaluating a string as JavaScript violates the following Content Security Policy directive`.
+
+Use the same nonce in three places: your policy's `script-src`, the script tag that loads Datastar, and `Ds.nonce`.
+The nonce must not be empty, and it should be new for every response. Datastar reads the attribute once and then removes it from the page.
+
+```fsharp
+let nonce = "..." // a new random value for each response
+ctx.Response.Headers["Content-Security-Policy"] <- $"script-src 'nonce-{nonce}'"
+
+Elem.html [ Ds.nonce nonce ] [
+    Elem.head [] [ Elem.script [ Attr.type' "module"; Attr.src Ds.cdnSrc; Attr.create "nonce" nonce ] [] ]
+    Elem.body [] [ (* ... *) ]
+]
 ```
 
 ### [Ds.ignore | Ds.ignoreSelf | Ds.ignoreMorph : `data-star-ignore`](https://data-star.dev/reference/attributes#data-ignore)

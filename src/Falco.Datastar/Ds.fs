@@ -528,6 +528,17 @@ type Ds =
         expressions |> String.concat " ; "
 
     /// <summary>
+    /// Gives Datastar the nonce of your Content Security Policy, so that it works on a page whose policy does not allow unsafe-eval.
+    /// Put it on the &lt;html&gt; element. Datastar reads it once and then removes the attribute.
+    /// Use the same nonce in your policy's script-src, on the script tag that loads Datastar, and here. The nonce must not be empty.
+    /// https://github.com/starfederation/datastar/blob/v1.0.4/library/src/engine/csp.ts
+    /// </summary>
+    /// <param name="nonce">The nonce for this response. Generate a new one for every response</param>
+    /// <returns>Attribute</returns>
+    static member nonce (nonce:string) =
+        DsAttr.create ("nonce", value = Js.attrEncode nonce)
+
+    /// <summary>
     /// An attribute that should be added to the &lt;body&gt; when creating a streaming app to avoid the issue explained here:
     /// https://stackoverflow.com/questions/8788802/prevent-safari-loading-from-cache-when-back-button-is-clicked
     /// </summary>

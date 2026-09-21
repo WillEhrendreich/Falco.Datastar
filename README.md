@@ -112,11 +112,64 @@ Navigate to `https://localhost:5001` in your browser and click the button. You s
 
 Jump to [Signal Reading and Server Side Events](#reading-signals-and-server-side-events).
 
+## The Tao of Datastar
+
+Datastar's authors describe [the way they mean it to be used](https://data-star.dev/guide/the_tao_of_datastar). This library tries to make that way the easy one.
+
+| The Tao says | In this library |
+| --- | --- |
+| Most state lives on the backend, which is the source of truth. | Your handlers own the state. Nothing here keeps state for you. |
+| Use signals sparingly: for user interactions, and for sending new state to the backend. | Every [signal has a kind](#signals-expressions-and-statements-in-f). `Signal.browser` never leaves the browser, and `Signal.server` is sent with requests. |
+| The backend drives the frontend by patching elements and signals. | The `Response` functions patch elements and signals. |
+| There is no real benefit to a content type other than `text/event-stream`. | The `Response` functions send Server Side Events, and nothing else. |
+| Start with the defaults. | An option that you leave at `RequestOptions.Defaults` is not sent, so Datastar's own default applies. |
+| In morph we trust: send big chunks, up to the whole page. | `Response.ofHtmlElements` patches by element `id`, with Datastar's default outer morph. |
+| Compress the stream. | See [Compression](#compression). |
+| Use CQRS: one long-lived request reads, short requests write. | See [CQRS](#cqrs). |
+| Show a loading indicator, and confirm success only from the backend. | Use `Ds.indicator` with a `Signal.browser<bool>`. The library has no helper for optimistic updates. |
+| Use anchors to navigate, and let the browser keep the history. | The library has no navigation or history helper. |
+
+### CQRS
+
+One long-lived request reads. The server writes to it whenever something changes. Short requests write, and the change comes back over the stream.
+
+```fsharp
+// The long-lived request. The server sends an update whenever the state changes.
+Elem.body [ Ds.onInit (Stmt.get "/updates") ] [
+    // A short request. The server answers 204 No Content, and the change arrives on the stream.
+    Elem.button [ Ds.onClick (Stmt.post "/items/add") ] [ Text.raw "Add" ]
+]
+```
+
+A 204 response ends without an error and is not retried. The [RocketComponents example](examples/RocketComponents) is a whole working app: one agent owns the state, and every visitor sees each change as it happens.
+
+### Compression
+
+A stream of morphs compresses very well. ASP.NET Core does not compress `text/event-stream` unless you add it:
+
+```fsharp
+let builder = WebApplication.CreateBuilder()
+
+builder.Services.AddResponseCompression(fun options ->
+    options.EnableForHttps <- true
+    options.Providers.Add<BrotliCompressionProvider>()
+    options.MimeTypes <- Seq.append ResponseCompressionDefaults.MimeTypes [ "text/event-stream" ])
+|> ignore
+
+let wapp = builder.Build()
+wapp.UseResponseCompression() |> ignore
+```
+
+Each event still reaches the browser as soon as it is sent. In the example the stream had `content-encoding: br`, and another viewer received each change within a few milliseconds.
+`EnableForHttps` compresses HTTPS responses too. A response that holds both a secret, such as a CSRF token, and text that an attacker can choose can leak the secret (the BREACH attack), so keep such responses out of the stream, or leave `EnableForHttps` off.
+
 ## Signals and Expressions
 
-Datastar uses signals to manage state. Signals are reactive variables that automatically track and
-propagate changes in [Datastar expressions](https://data-star.dev/guide/datastar_expressions).
-They can be created and modified using data attributes on the frontend, or events sent from the backend.
+Signals are reactive variables in the browser. When one changes, every binding and expression that reads it updates.
+They can be created and changed with data attributes on the frontend, or by events sent from the backend.
+
+Use them sparingly. The Tao of Datastar says that most state lives on the backend, and that signals are for user interactions, such as toggling an element,
+and for sending new state to the backend, such as binding a form input. See [The Tao of Datastar](#the-tao-of-datastar).
 
 [Datastar expressions](https://data-star.dev/guide/datastar_expressions) are strings that are evaluated by bindings, events, and triggers.
 Updating a signal value in an expression will cause other bindings and expressions to update elsewhere.
@@ -124,9 +177,61 @@ Updating a signal value in an expression will cause other bindings and expressio
 Some important notes: Signals defined later in the DOM tree override those defined earlier.
 `data-*` attributes are [evaluated in the order they appear in the DOM](https://data-star.dev/reference/attributes#attribute-evaluation-order); meaning that signals need to be specified before they can be used.
 
+### Signals, expressions and statements in F#
+
+Most functions above take JavaScript as a string, such as `Ds.text "$count"`. Nothing checks the string until the browser runs it.
+This library also has typed versions. The compiler then catches a signal that does not exist, a condition that is not a boolean, and a value of the wrong type.
+The string versions still work.
+
+A `Signal<'T>` has a type and a kind. The kind decides whether Datastar sends the signal to the server:
+
+- `Signal.browser<'T> "name"` stays in the browser. Datastar never sends it, because its name starts with an underscore, which the function adds for you. Use it for what the user does on the page.
+- `Signal.server<'T> "name"` is sent with every request. Use it for new state that the backend needs, such as the value of a form input.
+- `Signal.rocket<'T> "name"` belongs to one instance of a [Rocket component](#rocket-components).
+
+```fsharp
+let count = Signal.browser<int> "count"
+let name = Signal.server<string> "form.name"
+
+Elem.div [ Ds.signal (count, 0); Ds.signal (name, "Ada") ] [
+    Elem.button [ Ds.onClick (Stmt.set count (Expr.add (Expr.read count) (Expr.int 1))) ] [ Text.raw "+" ]
+    Elem.span [ Ds.text (Expr.read count) ] []
+    Elem.input [ Ds.bind name ]
+    Elem.button [ Ds.onClick (Stmt.post "/save") ] [ Text.raw "Save" ]   // sends form.name, and not count
+]
+```
+
+In a browser, the save request carried only `{"form":{"name":"..."}}`. The browser signal `count` stayed on the page.
+
+A name that Datastar cannot use is refused with a message that says what to write. A server signal cannot start with an underscore, because Datastar would keep it in the browser.
+A name with a hyphen is refused too, because an expression reads a hyphen as minus. `Signal.tryCreate` returns the reason as a value. `Signal.browser`, `Signal.server` and `Signal.rocket` raise an `ArgumentException` with the same message.
+
+An `Expr<'T>` is an expression with a value, and a `Stmt` is something that is done. Build them with these functions:
+
+| For | Functions |
+| --- | --- |
+| Values | `Expr.int`, `Expr.float`, `Expr.bool`, `Expr.string`, `Expr.read signal` |
+| Numbers | `Expr.add`, `Expr.subtract`, `Expr.multiply`, `Expr.divide`, `Expr.remainder` |
+| Comparing | `Expr.equal`, `Expr.notEqual`, `Expr.greater`, `Expr.less`, `Expr.atLeast`, `Expr.atMost` |
+| Booleans | `Expr.andAlso`, `Expr.orElse`, `Expr.negate` |
+| Choosing | `Expr.ifElse condition whenTrue whenFalse` |
+| Text | `Expr.concat`, `Expr.toText` |
+| Doing | `Stmt.set signal value`, `Stmt.toggle signal`, `Stmt.all [ ... ]` |
+| Backend actions | `Stmt.get`, `Stmt.post`, `Stmt.put`, `Stmt.patch`, `Stmt.delete`, `Stmt.query`, and the same with `With` and a `RequestOptions` |
+
+`Ds.text`, `Ds.show`, `Ds.class'`, `Ds.attr'`, `Ds.style`, `Ds.computed`, `Ds.signal`, `Ds.bind`, `Ds.indicator`, `Ds.onEvent`, `Ds.onClick`, `Ds.onInit`, `Ds.effect`, `Ds.onInterval`,
+`Ds.onIntersect` and `Ds.onSignalPatch` all have overloads that take them. `Ds.show` only accepts a boolean expression, and `Ds.onClick` only accepts a statement.
+
+Three details are worth knowing. Operators are written with spaces, because Datastar reads `$a-1` as a signal called `a-1`. `Expr.add` and the other arithmetic functions take numbers, and text is joined with `Expr.concat`.
+Text in `Expr.string`, and the URL in `Stmt.get` and the like, is escaped, so it stays text whatever it contains.
+
+For what the typed functions do not cover, `Expr.unsafeRaw` and `Stmt.unsafeRaw` pass JavaScript through. Nothing checks it. Never build it from text that a user can change.
+The same goes for the string helpers: pass user values to Datastar through signals, and keep the text of an expression fixed, as the [Datastar documentation](https://data-star.dev/reference/security) advises.
+
 #### Sections:
 
 - [Index](#attribute-index)
+- [Signals, expressions and statements in F#](#signals-expressions-and-statements-in-f)
 - [Creating Signals](#creating-signals)
 - [Binding to Signals](#signal-binding)
 - [Events and Triggers](#events-and-triggers)
@@ -245,6 +350,7 @@ Elem.div [ Ds.onEvent ("my-event", "$seen = true") |> Ds.withCase CaseStyle.Came
 
 It works on `Ds.bind`, `Ds.class'`, `Ds.computed`, `Ds.indicator`, `Ds.onEvent` and `Ds.signal`.
 It does nothing on `Ds.ref` and `Ds.signals`, which put the name or the object in the attribute's value and not in its key.
+Datastar's default casing is the recommended one, so use `Ds.withCase` only when you have a reason, such as a server that uses `snake_case` JSON.
 
 ## _Signal Binding_
 
@@ -264,12 +370,12 @@ Elem.input [ Attr.type' "text"; Ds.bind "firstName" ]
 ```
 
 For custom elements and web components, `Ds.bindProp` binds a signal to a named property of the element. You can also list the events that copy the property back into the signal.
-`Ds.bindEvent` changes only the events. Property names come out in kebab-case, because the HTML parser lowercases attribute names, and Datastar turns them back into camelCase.
+`Ds.bindEvent` changes only the events, and needs at least one, because with none Datastar never syncs the signal. Property names come out in kebab-case, because the HTML parser lowercases attribute names, and Datastar turns them back into camelCase.
 
 ```fsharp
 Elem.create "my-slider" [ Ds.bindProp (sp"volume", "value", [ "change" ]) ] []
 Elem.create "my-toggle" [ Ds.bindProp (sp"isOn", "isOn") ] []
-Elem.create "my-input" [ Ds.bindEvent (sp"query", [ "input"; "change" ]) ] []
+Elem.create "my-input" [ Ds.bindEvent (sp"query", "input", [ "change" ]) ] []
 ```
 
 ```html
@@ -422,19 +528,22 @@ Elem.div [ Ds.onSignalPatchFilter (SignalsFilter.Include "/foo/") ] []
 
 ### [Ds.onInterval : `data-on-interval`](https://data-star.dev/reference/attributes#data-on-interval)
 
-Runs an expression at a regular interval. The interval duration defaults to 1 second and can be modified by passing a `TimeSpan`
+Runs a statement at a regular interval. Pass the interval in milliseconds, and `leading = true` to run it once straight away.
+The Tao of Datastar prefers one long-lived stream from the server to polling, so use an interval for work that only the browser needs, such as a clock, and not to ask the backend for changes.
 
 ```fsharp
-Elem.div [
-    Ds.signal (sp"intervalSignalOneSecond", false)
-    Ds.onInterval "$intervalSignalOneSecond = !$intervalSignalOneSecond"
-    Ds.text "'One Second Interval = ' + $intervalSignalOneSecond"
-] []
+let tick = Signal.browser<bool> "tick"
 
 Elem.div [
-    Ds.signal (sp"intervalSignalFiveSecond", false)
-    Ds.onInterval ("$intervalSignalFiveSecond = !$intervalSignalFiveSecond", TimeSpan.FromSeconds(5.0), leading = true)
-    Ds.text "'Five Second Interval = ' + $intervalSignalFiveSecond"
+    Ds.signal (tick, false)
+    Ds.onInterval (Stmt.toggle tick, 1000)
+    Ds.text (Expr.ifElse (Expr.read tick) (Expr.string "tick") (Expr.string "tock"))
+] []
+
+// The same with strings
+Elem.div [
+    Ds.signal (sp"fiveSecond", false)
+    Ds.onInterval ("$fiveSecond = !$fiveSecond", 5000, leading = true)
 ] []
 ```
 
@@ -468,10 +577,11 @@ Elem.button [ Ds.onClick (Ds.query "/query") ] [ Text.raw "Query" ]
 `@query` sends an HTTP `QUERY` request. Like a `@get`, it does not change anything on the server, but it sends the signals in the request body instead of the query string.
 
 The majority of the above examples are fired from a button click, but remember that these are
-[Datastar expressions](https://data-star.dev/guide/datastar_expressions) and any [event or trigger](#_events-and-triggers_)
+[Datastar expressions](https://data-star.dev/guide/datastar_expressions) and any [event or trigger](#events-and-triggers)
 could activate them.
 
-Each request action can also be provided a number of options, explained in depth [here](https://data-star.dev/reference/actions#options):
+Each request action can also be provided a number of options, explained in depth [here](https://data-star.dev/reference/actions#options).
+Start with the defaults. Datastar's authors recommend them for most apps, and an option that you leave at `RequestOptions.Defaults` is not sent, so Datastar's own default applies.
 
 ```fsharp
 Elem.button [ Ds.onClick (Ds.get ("/endpoint",
@@ -595,7 +705,8 @@ You write a component in JavaScript with `rocket(tag, { props, setup, render })`
 Load Datastar with `Ds.rocketCdnScript` to use it. The helpers below write only the values you pass, so Rocket's own defaults still apply.
 Datastar's [Rocket reference](https://data-star.dev/reference/rocket) says that Rocket is in beta and that its API is subject to change, so these helpers may need to change with it.
 
-The [RocketComponents example](examples/RocketComponents) is a small app that uses everything described here.
+Rocket components fit the Tao when they hold behaviour for the user interface. Keep business state on the backend, and let a component emit an event that the page turns into a request.
+The [RocketComponents example](examples/RocketComponents) does this: props come from the server, one component keeps state that only the browser needs, and the events turn into commands.
 
 ### `Rocket.propString | propNumber | propBool | propDate | propJson | propBin`
 
@@ -639,6 +750,21 @@ The children of a light-DOM component (`mode: 'light'`), and the component's own
 In an open shadow-DOM component, `Rocket.local` and `Rocket.root` also work in the children that the server rendered.
 Rocket rewrites `$$name` into a path that is unique to that instance, so two instances do not share it. It rewrites `@name(...)` into a call to the action registered with `action('name', fn)` in the component's `setup`, or, if there is none, into a call to the Datastar action with that name.
 
+The typed way declares the signal in F#, so the state needs no JavaScript:
+
+```fsharp
+let isOn = Signal.rocket<bool> "on"
+
+Elem.create "my-toggle" [ Attr.id "toggle" ] [
+    Elem.div [ Ds.signal (isOn, false) ] []
+    Elem.button [ Ds.onClick (Stmt.toggle isOn) ] [ Text.raw "Toggle" ]
+    Elem.p [ Ds.show (Expr.read isOn) ] [ Text.raw "Now you see me." ]
+]
+```
+
+Define the tag with `rocket('my-toggle', { mode: 'light' })` and nothing more. Two instances keep separate state. In a browser, toggling one left the other alone.
+The string helpers do the same, with an action that you register in JavaScript:
+
 ```fsharp
 Elem.create "my-toggle" [ Attr.id "toggle" ] [
     Elem.button [ Ds.onClick (Rocket.call "flip") ] [ Text.raw "Toggle" ]
@@ -665,13 +791,21 @@ In an open or closed shadow-DOM component it does not: the `<template>` elements
 For a shadow-DOM component, put the directives in its `render` function in JavaScript, or use `mode: 'light'`.
 
 ```fsharp
+let items = Signal.rocket<string list> "items"
+let count = Signal.rocket<int> "count"
+
 Elem.ul [] [
-    Rocket.templateFor (Rocket.local "log", [ Elem.li [ Ds.text "n + ': ' + entry" ] [] ], item = "entry", index = "n")
+    Rocket.forEach (Expr.read items, fun item index -> [ Elem.li [ Ds.text (Expr.concat [ Expr.toText index; Expr.string ": "; item ]) ] [] ])
 ]
 
-Rocket.templateIf ("$$count >= 10", [ Text.raw "That is a lot." ])
+Rocket.templateIf (Expr.greater (Expr.read count) (Expr.int 9), [ Text.raw "That is a lot." ])
 Rocket.templateElse [ Text.raw "Keep going." ]
 ```
+
+`Rocket.forEach` gives the function that builds a row the item and the index as typed expressions, so the row cannot refer to a name that the loop does not define. Pass `itemName` and `indexName` to choose other names.
+`Rocket.templateFor` and the string versions of `templateIf` and `templateElseIf` take the list and the condition as text.
+
+The Tao says to keep your HTML DRY with your backend templates. Render a list on the server when the server knows it, and use these directives for lists that only the browser knows.
 
 ### `Request.getRocketManifests`
 
@@ -703,6 +837,8 @@ This reads the manifest only. Generating F# code from it is left to a separate t
 
 ## _When to `$`_
 
+This section is about the string helpers. With the [typed functions](#signals-expressions-and-statements-in-f) you do not choose: `Expr.read signal` is the value, `Ds.bind signal` takes the signal, and the compiler tells you which one a function needs.
+
 You may have noticed in the sample code that the `$` is used in some places, but not others. At first, it might be
 confusing when a `$` is required, but it really isn't all that complicated when you think of it as either being a signal path or not.
 
@@ -728,7 +864,7 @@ with [Datastar Server Side Events (SSEs)](https://data-star.dev/reference/sse_ev
 Sections:
 - [Reading Signal Values](#reading-signal-values)
 - [Responding with Signals](#responding-with-signals)
-- [Responding with HTML Elements](#responding-with-html-fragments)
+- [Responding with HTML Elements](#responding-with-html-elements)
 - [Streaming Server Side Events](#streaming-server-side-events)
 
 ## _Reading Signal Values_
@@ -832,7 +968,7 @@ Response.ofRemoveElement (sel"#hello")   // needs: open Falco.Datastar.Selector
 
 ### Patch options
 
-`Response.ofHtmlElementsOptions` and `Response.ofHtmlStringElementsOptions` take a `PatchElementsOptions`, which sets where and how the elements are patched. Start from `PatchElementsOptions.Defaults`.
+`Response.ofHtmlElementsOptions` and `Response.ofHtmlStringElementsOptions` take a `PatchElementsOptions`, which sets where and how the elements are patched. Start from `PatchElementsOptions.Defaults`. The default mode, `Outer`, morphs the element that has the matching `id`. Datastar recommends it, so use another mode only when you have a reason.
 
 | Field | What it does |
 | --- | --- |
@@ -862,7 +998,7 @@ to having all the clients poll the server every few moments, and provides much g
 
 The [progress bar example](https://data-star.dev/examples/progress_bar) is a great and simple demonstration of what can be achieved with [Datastar](https://data-star.dev); no polling necessary.
 
-All the functions in [Responding with Signals](#responding-with-signals) and [Responding with HTML Elements](#responding-with-html-fragments)
+All the functions in [Responding with Signals](#responding-with-signals) and [Responding with HTML Elements](#responding-with-html-elements)
 are mirrored with a function with `sse` as their prefix instead of `of`.
 
 ```fsharp

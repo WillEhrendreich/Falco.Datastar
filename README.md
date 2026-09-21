@@ -789,7 +789,7 @@ See the [Streaming example](examples/Streaming) for more.
 
 ## Upgrading
 
-This section covers upgrading from version 1.3.0 or earlier. It lists what can stop your code compiling, what can produce warnings, and what changes the output without any compiler message.
+This section covers upgrading to version 1.4.0 from version 1.3.0 or earlier. It lists what can stop your code compiling, what can produce warnings, and what changes the output without any compiler message.
 
 ### Changes that stop your code compiling
 

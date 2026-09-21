@@ -216,7 +216,9 @@ An `Expr<'T>` is an expression with a value, and a `Stmt` is something that is d
 | Booleans | `Expr.andAlso`, `Expr.orElse`, `Expr.negate` |
 | Choosing | `Expr.ifElse condition whenTrue whenFalse` |
 | Text | `Expr.concat`, `Expr.toText` |
+| Not subscribing | `Expr.peek`, which reads a value without running the expression again when it changes |
 | Doing | `Stmt.set signal value`, `Stmt.toggle signal`, `Stmt.all [ ... ]` |
+| Many signals | `Stmt.setAll prefix value`, `Stmt.toggleAll prefix`, and `Stmt.setAllWhere` / `Stmt.toggleAllWhere` with a `SignalsFilter` |
 | Backend actions | `Stmt.get`, `Stmt.post`, `Stmt.put`, `Stmt.patch`, `Stmt.delete`, `Stmt.query`, and the same with `With` and a `RequestOptions` |
 
 `Ds.text`, `Ds.show`, `Ds.class'`, `Ds.attr'`, `Ds.style`, `Ds.computed`, `Ds.signal`, `Ds.bind`, `Ds.indicator`, `Ds.onEvent`, `Ds.onClick`, `Ds.onInit`, `Ds.effect`, `Ds.onInterval`,

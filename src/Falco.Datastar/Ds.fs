@@ -467,9 +467,7 @@ type Ds =
     /// <param name="signalsFilter">Regex of signal paths to be included and excluded</param>
     /// <returns>Expression</returns>
     static member setAllFiltered<'T> (value:'T, signalsFilter:SignalsFilter) =
-        match signalsFilter = SignalsFilter.None with
-        | true -> $"@setAll({Js.literal value})"
-        | false -> $"@setAll({Js.literal value}, {signalsFilter |> SignalsFilter.Serialize |> Js.attrEncode})"
+        FilterActionExpression.setAll value signalsFilter
 
     /// <summary>
     /// @setAll(), set all the signals that start with the prefix to the value provided.
@@ -497,9 +495,7 @@ type Ds =
     /// <param name="signalsFilter">Regex of signal paths to be included and excluded</param>
     /// <returns>Expression</returns>
     static member toggleAllFiltered (signalsFilter:SignalsFilter) =
-        match signalsFilter = SignalsFilter.None with
-        | true -> "@toggleAll()"
-        | false -> $"@toggleAll({signalsFilter |> SignalsFilter.Serialize |> Js.attrEncode})"
+        FilterActionExpression.toggleAll signalsFilter
 
     /// <summary>
     /// @peek(): evaluates the expression without subscribing to the signals it reads.

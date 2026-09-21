@@ -111,6 +111,17 @@ module internal BackendActionExpression =
         | ValueNone -> $"@{name}({Js.stringLiteral url})"
         | ValueSome options' -> $"@{name}({Js.stringLiteral url},{RequestOptions.Serialize options'})"
 
+module internal FilterActionExpression =
+    let setAll<'T> (value:'T) (filter:SignalsFilter) =
+        match SignalsFilter.IsNone filter with
+        | true -> $"@setAll({Js.literal value})"
+        | false -> $"@setAll({Js.literal value}, {filter |> SignalsFilter.Serialize |> Js.attrEncode})"
+
+    let toggleAll (filter:SignalsFilter) =
+        match SignalsFilter.IsNone filter with
+        | true -> "@toggleAll()"
+        | false -> $"@toggleAll({filter |> SignalsFilter.Serialize |> Js.attrEncode})"
+
 [<RequireQualifiedAccess>]
 module Expr =
     /// The JavaScript that Datastar runs, ready to put in an attribute.
@@ -170,6 +181,10 @@ module Expr =
     /// Any value as text.
     let toText (Expr value:Expr<'T>) : Expr<string> = Expr $"String({value})"
 
+    /// Reads a value without subscribing to the signals in it, so a change to them does not run the expression again.
+    /// Use it inside Ds.effect or Ds.computed. https://data-star.dev/reference/actions#peek
+    let peek (Expr value:Expr<'T>) : Expr<'T> = Expr $"@peek(() => {value})"
+
 [<RequireQualifiedAccess>]
 module Stmt =
     let toString (Stmt text) = text
@@ -185,6 +200,18 @@ module Stmt =
 
     /// JavaScript that this library has no typed function for. Nothing checks it. Never build it from text a user can change.
     let unsafeRaw (javaScript:string) : Stmt = Stmt javaScript
+
+    /// Sets every signal whose path starts with the prefix, e.g. "form.", to the value. https://data-star.dev/reference/actions#setall
+    let setAll (prefix:string) (value:'T) : Stmt = Stmt (FilterActionExpression.setAll value (SignalsFilter.Prefix prefix))
+
+    /// Sets every signal that matches the filter to the value, or every signal when there is no filter.
+    let setAllWhere (filter:SignalsFilter) (value:'T) : Stmt = Stmt (FilterActionExpression.setAll value filter)
+
+    /// Toggles every signal whose path starts with the prefix. https://data-star.dev/reference/actions#toggleall
+    let toggleAll (prefix:string) : Stmt = Stmt (FilterActionExpression.toggleAll (SignalsFilter.Prefix prefix))
+
+    /// Toggles every signal that matches the filter, or every signal when there is no filter.
+    let toggleAllWhere (filter:SignalsFilter) : Stmt = Stmt (FilterActionExpression.toggleAll filter)
 
     let get (url:string) : Stmt = Stmt (BackendActionExpression.render ValueNone (Get url))
     let post (url:string) : Stmt = Stmt (BackendActionExpression.render ValueNone (Post url))

@@ -187,6 +187,20 @@ module ExprTests =
         let options = { RequestOptions.Defaults with Retry = OnError }
         Stmt.toString (Stmt.postWith "/items" options) |> should equal (Ds.post ("/items", options))
 
+    [<Fact>]
+    let ``setAll and toggleAll are statements, and write the same as the string helpers`` () =
+        Stmt.toString (Stmt.setAll "foo." true) |> should equal (Ds.setAll ("foo.", true))
+        Stmt.toString (Stmt.setAll "foo." 5) |> should equal """@setAll(5, { include: /^foo\./ })"""
+        Stmt.toString (Stmt.toggleAll "foo.") |> should equal (Ds.toggleAll "foo.")
+        Stmt.toString (Stmt.setAllWhere SignalsFilter.None false) |> should equal "@setAll(false)"
+        Stmt.toString (Stmt.toggleAllWhere SignalsFilter.None) |> should equal "@toggleAll()"
+
+    [<Fact>]
+    let ``peek reads a value without subscribing to the signals in it`` () =
+        Expr.toString (Expr.peek (Expr.read count)) |> should equal "@peek(() => $_count)"
+        Stmt.toString (Stmt.set menuOpen (Expr.greater (Expr.peek (Expr.read count)) (Expr.int 0)))
+        |> should equal "$_menuOpen = (@peek(() => $_count) > 0)"
+
     // Attributes take typed values
 
     [<Fact>]

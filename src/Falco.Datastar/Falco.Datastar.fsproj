@@ -49,6 +49,7 @@
     <Compile Include="Utility.fs" />
     <Compile Include="Types.fs" />
     <Compile Include="Ds.fs" />
+    <Compile Include="Rocket.fs" />
     <Compile Include="Request.fs" />
     <Compile Include="Response.fs" />
   </ItemGroup>

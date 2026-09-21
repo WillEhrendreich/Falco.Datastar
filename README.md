@@ -925,7 +925,7 @@ See the [Streaming example](examples/Streaming) for more.
 
 ## Upgrading
 
-This section covers upgrading to version 1.4.0 from version 1.3.0 or earlier. It lists what can stop your code compiling, what can produce warnings, what can clash with your own names, what changes the output without any compiler message, and what changes in your dependencies.
+This section covers upgrading to version 1.4.0 from version 1.3.0 or earlier. It lists what can stop your code compiling, what can produce warnings, what can clash with your own names, what changes the output without any compiler message, what changes in your dependencies, and what changes in Datastar itself.
 
 ### Changes that stop your code compiling
 
@@ -980,7 +980,7 @@ Numbers are now written as numbers: `Ds.setAll ("foo.", 5)` used to write `'5'`,
 It now sends your object as the request body. If your server code expects the signals, change it to expect your object, or stop using `CustomJson`.
 
 **`Ds.cdnSrc` and `Ds.cdnScript`.** They now load Datastar 1.0.4. They loaded 1.0.0-RC.7 before, so your pages move across several Datastar releases.
-This library does not list every change in Datastar itself. Read the [Datastar release notes](https://github.com/starfederation/datastar/releases) before you deploy.
+The changes in Datastar that can affect your pages are listed under [Changes in Datastar itself](#changes-in-datastar-itself), and the full list is in the [Datastar release notes](https://github.com/starfederation/datastar/releases).
 To stay on the old script for now, write the tag yourself. Note that `Ds.query`, `RequestCancellation = Cleanup` and `RequestOptions.RetryMaxWait` need the newer script.
 
 ```fsharp
@@ -997,3 +997,21 @@ If your own project references `StarFederation.Datastar.FSharp` directly at a ve
 
 `PatchElementsOptions` has a new field, `ViewTransitionSelector`, for scoped view transitions. `PatchElementsOptions.Defaults with ...` needs no change, but code that calls the constructor must pass the new argument.
 Everything the SDK sends is otherwise the same as before.
+
+### Changes in Datastar itself
+
+Moving from the RC.7 script to 1.0.4 changes how some pages behave, whatever your F# code does. These are the changes from the [release notes](https://github.com/starfederation/datastar/releases) that can affect a page built with this library.
+
+**A `$name` inside quotes is no longer replaced (RC.8).** In an expression, `'Hello $name'` now stays as the text `Hello $name`. Join the parts instead, as in `'Hello ' + $name`, or use a template literal, where `${...}` is still replaced: `` `Hello ${$name}` ``. Since 1.0.4 the same holds for `@action(` inside a string. Both forms were checked in a browser.
+
+**A request is no longer cancelled when its element is removed (RC.8).** `RequestCancellation.Auto` used to do that. Use `RequestCancellation = Cleanup` if you want it.
+
+**Requests with the same method and URL cancel each other (1.0.2).** Starting a `@get('/items')` cancels an earlier `@get('/items')` that is still running, even when a different element started it. Use `RequestCancellation = Disabled` to let both run.
+
+**A `@get` or `@delete` has no body and no `Content-Type` header (1.0.0).** Server code that looked for `application/json` on those requests will no longer find it. The signals are in the `datastar` query parameter.
+
+**Checkboxes and radio buttons update the signal on `input` (1.0.2).** `Ds.bind` used to use `change` for them. Use `Ds.bindEvent` to choose the events yourself.
+
+**A patch that changes an input's property fires `datastar-prop-change` and not `change` (1.0.0).** If you relied on the native `change` event after a server patch, listen for the new event with `Ds.onEvent ("datastar-prop-change", ...)`.
+
+**A retried request sends the current signals (RC.8 and 1.0.3).** Before, a retry could send the values the signals had when the first attempt started.

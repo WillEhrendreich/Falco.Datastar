@@ -1,0 +1,34 @@
+name: dst
+
+# Runs the simulation tests with many seeds. It only runs when someone starts it: Actions tab, dst, Run workflow.
+# A failure names the seed. Replay it with DST_SEED=<seed> dotnet test test/Falco.Datastar.Tests -c Release
+on:
+  workflow_dispatch:
+    inputs:
+      seeds:
+        description: "How many seeds to run for each simulation test (1 to this number)"
+        required: true
+        default: "1000"
+
+permissions:
+  contents: read
+
+jobs:
+  dst:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+
+      - name: Test with many seeds
+        run: dotnet test test/Falco.Datastar.Tests -c Release --framework net10.0
+        env:
+          DST_SEEDS: ${{ inputs.seeds }}

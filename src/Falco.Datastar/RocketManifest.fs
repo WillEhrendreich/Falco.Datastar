@@ -92,10 +92,16 @@ type RocketManifestError =
     | UnsupportedVersion of found:int * supported:int
     /// The body is JSON, but it is not an object
     | NotAnObject
+    /// The connection failed before the whole body was read, for example because the browser closed it
+    | ConnectionFailed of reason:string
+    /// The request was cancelled before the whole body was read
+    | Cancelled
     with
     /// A message for a person, that says what is wrong. When the fix is not obvious, it says what to do
     member error.Message =
         match error with
+        | ConnectionFailed reason -> $"The request body could not be read: {reason}. The connection probably closed before the page finished posting, so there may be nobody to answer."
+        | Cancelled -> "The request was cancelled before the whole body was read, so there may be nobody to answer."
         | NotAnObject -> "The manifest must be a JSON object with a version, a generatedAt and a list of components, but the body is something else. Check that the request comes from publishRocketManifests."
         | RocketManifestError.NotJson reason -> $"The manifest is not valid JSON: {reason}"
         | RocketManifestError.TooLarge limitBytes ->

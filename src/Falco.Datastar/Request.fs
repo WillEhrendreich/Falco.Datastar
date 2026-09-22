@@ -34,24 +34,29 @@ let private maxManifestBytes = 1024 * 1024
 
 /// <summary>
 /// Read the manifest that Rocket's publishRocketManifests posts to your server. It returns a RocketManifestError when the body is not a manifest this library can read,
-/// or when it is larger than 1 MiB, in which case the rest of the body is not read.
-/// A connection that fails, or a request that is cancelled, is not an answer to give, so it throws an IOException or an OperationCanceledException.
+/// when it is larger than 1 MiB (the rest of the body is not read), when the connection fails before the whole body arrives (ConnectionFailed),
+/// and when the request is cancelled (Cancelled). It does not throw for any of these. Anything else is a mistake in the code, and it does throw.
 /// Can only call this once per request
 /// </summary>
 /// <param name="ctx">HttpContext</param>
 let getRocketManifests (ctx:HttpContext) =
     task {
-        use body = new MemoryStream()
-        let chunk : byte array = Array.zeroCreate 8192
-        let mutable finished = false
-        while not finished && body.Length <= int64 maxManifestBytes do
-            let! count = ctx.Request.Body.ReadAsync(Memory<byte>(chunk), ctx.RequestAborted)
-            match count with
-            | 0 -> finished <- true
-            | count -> body.Write(chunk, 0, count)
-        match body.Length > int64 maxManifestBytes with
-        | true ->
-            return Error (RocketManifestError.TooLarge maxManifestBytes)
-        | false ->
-            return RocketManifest.parse (System.Text.Encoding.UTF8.GetString(body.GetBuffer(), 0, int body.Length))
+        try
+            use body = new MemoryStream()
+            let chunk : byte array = Array.zeroCreate 8192
+            let mutable finished = false
+            while not finished && body.Length <= int64 maxManifestBytes do
+                let! count = ctx.Request.Body.ReadAsync(Memory<byte>(chunk), ctx.RequestAborted)
+                match count with
+                | 0 -> finished <- true
+                | count -> body.Write(chunk, 0, count)
+            match body.Length > int64 maxManifestBytes with
+            | true ->
+                return Error (RocketManifestError.TooLarge maxManifestBytes)
+            | false ->
+                return RocketManifest.parse (System.Text.Encoding.UTF8.GetString(body.GetBuffer(), 0, int body.Length))
+        with
+        | :? OperationCanceledException -> return Error RocketManifestError.Cancelled
+        // ASP.NET Core's BadHttpRequestException and the errors of a connection that was reset are IOExceptions too
+        | :? IOException as error -> return Error (RocketManifestError.ConnectionFailed error.Message)
     }

@@ -217,8 +217,8 @@ module DstManifestTests =
                     stream.BytesRead |> should equal body.Length)
 
     [<Fact>]
-    let ``Request.getRocketManifests lets a failed or cancelled connection show, and never gives a result for half a body`` () =
-        Dst.run "Request.getRocketManifests lets a failed" (fun random ->
+    let ``Request.getRocketManifests gives an error for a failed or cancelled connection, and never a result for half a body`` () =
+        Dst.run "Request.getRocketManifests gives an error" (fun random ->
             let mutable failures = 0
             let mutable cancellations = 0
             for _ in 1 .. 25 do
@@ -230,13 +230,13 @@ module DstManifestTests =
                 let ctx = DefaultHttpContext()
                 ctx.RequestAborted <- cancel.Token
                 ctx.Request.Body <- new ChaosStream(body, random, fault, cancel)
+                let result = (Request.getRocketManifests ctx).GetAwaiter().GetResult()
                 match fault with
                 | IoFailureAt _ ->
-                    let error = Assert.Throws<IOException>(fun () -> (Request.getRocketManifests ctx).GetAwaiter().GetResult() |> ignore)
-                    error.Message |> should equal "The connection was reset"
+                    result |> should equal (Error (RocketManifestError.ConnectionFailed "The connection was reset") : Result<RocketManifestDocument, RocketManifestError>)
                     failures <- failures + 1
                 | _ ->
-                    Assert.ThrowsAny<OperationCanceledException>(fun () -> (Request.getRocketManifests ctx).GetAwaiter().GetResult() |> ignore) |> ignore
+                    result |> should equal (Error RocketManifestError.Cancelled : Result<RocketManifestDocument, RocketManifestError>)
                     cancellations <- cancellations + 1
             failures |> should be (greaterThan 3)
             cancellations |> should be (greaterThan 3))

@@ -218,6 +218,18 @@ so the name has to read the same there and in an expression. These names are ref
 
 `Signal.tryCreate scope name` returns the reason as a `SignalNameError`, which has a `Message`. `Signal.browser`, `Signal.server` and `Signal.rocket` raise an `ArgumentException` with the same message.
 
+```fsharp
+match Signal.tryCreate<int> SignalScope.Server "Menu" with
+| Ok signal -> Ds.signal (signal, 0)
+| Error (SignalNameError.StartsWithCapital name) -> failwith $"rename {name}"   // the case tells you what is wrong
+| Error error -> failwith error.Message
+// error.Message: The signal name 'Menu' has a part that starts with a capital letter. Datastar reads the name from an attribute name,
+// and HTML makes attribute names lower case, so the signal would be called 'menu' there but 'Menu' in an expression.
+// Start each part with a lower case letter, for example 'menu'.
+```
+
+The cases are `Blank`, `HasHyphen`, `StartsWithUnderscore`, `StartsWithCapital`, `HasDoubleUnderscore`, `EndsWithUnderscore` and `NotAPath`. They are `RequireQualifiedAccess`.
+
 An `Expr<'T>` is an expression with a value, and a `Stmt` is something that is done. Build them with these functions:
 
 | For | Functions |
@@ -235,6 +247,13 @@ An `Expr<'T>` is an expression with a value, and a `Stmt` is something that is d
 
 `Ds.text`, `Ds.show`, `Ds.class'`, `Ds.attr'`, `Ds.style`, `Ds.computed`, `Ds.signal`, `Ds.bind`, `Ds.indicator`, `Ds.onEvent`, `Ds.onClick`, `Ds.onInit`, `Ds.effect`, `Ds.onInterval`,
 `Ds.onIntersect` and `Ds.onSignalPatch` all have overloads that take them. The typed `Ds.show` takes a boolean expression, and the typed `Ds.onClick` takes a statement.
+
+```fsharp
+Expr.toString (Expr.divide (Expr.read count) (Expr.int 5))       // Math.trunc($_count / 5), because count is an int
+Expr.toString (Expr.unsafeRaw<bool> "$a || $b")                  // ($a || $b), so Expr.negate gives (!($a || $b))
+Expr.toString (Expr.string "it's")                               // 'it\'s'
+Stmt.toString (Stmt.all [ Stmt.set count (Expr.int 0); Stmt.toggle menuOpen ])   // $_count = 0; $_menuOpen = !$_menuOpen
+```
 
 Some details follow. Operators are written with spaces, because Datastar reads `$a-1` as a signal called `a-1`. `Expr.add` and the other arithmetic functions take numbers, and text is joined with `Expr.concat`.
 JavaScript has one kind of number, so `7 / 2` is 3.5 there. `Expr.divide` on whole numbers, such as `int`, cuts the result to a whole number, so an `int` signal never holds a fraction.
@@ -437,7 +456,15 @@ Elem.div [ Ds.class' ("hidden", "$foo") ] [] // add the 'hidden' class when $foo
 
 The class name goes into an attribute name (`data-class:hidden`), so it is checked. A name with a quote, a space, `=`, `/`, `<` or `>` is refused, because HTML would end the attribute name there.
 A name with a double underscore, such as `card__title`, is refused too, because Datastar reads `__` as the start of a modifier and would toggle a class called `card`. To toggle such a class, write the object form yourself:
-`Attr.create "data-class" "{'card__title': $isActive}"`. The same checks apply to the names in `Ds.attr'`, `Ds.style`, `Ds.onEvent` and `Rocket.prop*`. HTML lowercases attribute names, so write these names in lower case.
+`Attr.create "data-class" "{'card__title': $isActive}"`. The same checks apply to the names in `Ds.attr'`, `Ds.style`, `Ds.onEvent` and `Rocket.prop*`, and to the events of `Ds.bindEvent`. HTML lowercases attribute names, so write these names in lower case.
+
+```fsharp
+Ds.class' ("is-active", "$a")            // data-class:is-active="$a"
+Ds.class' ("card__title", "$a")          // ArgumentException: ... it contains '__'. Datastar reads '__' in an attribute name as the start of a modifier,
+                                         //    so it would read 'card__title' as 'card' with the modifier 'title'. Choose a name without '__'. ...
+Ds.class' ("x\" onmouseover=\"y", "$a")  // ArgumentException: ... it contains '"'. HTML ends an attribute name there,
+                                         //    and what follows would become attributes of their own. ...
+```
 
 ### [Ds.style : `data-style`](https://data-star.dev/reference/attributes#data-style)
 
@@ -554,6 +581,14 @@ Elem.div [ Ds.onSignalPatchFilter (SignalsFilter.Include "foo") ] []
 A `SignalsFilter` holds regular expressions for the paths of the signals to include and exclude. Write the pattern without slashes around it: the library adds them, and escapes a slash inside the pattern.
 `SignalsFilter.Prefix "form."` matches the signals that start with `form.`.
 
+```fsharp
+SignalsFilter.Serialize (SignalsFilter.Include "^form\\.")                          // { include: /^form\./ }
+SignalsFilter.Serialize { SignalsFilter.Prefix "form." with ExcludePattern = ValueSome "\\.id$" }
+                                                                                   // { include: /^form\./,exclude: /\.id$/ }
+SignalsFilter.Serialize (SignalsFilter.Include "a/b")                              // { include: /a\/b/ }, the slash is escaped for you
+Ds.onSignalPatchFilter (SignalsFilter.Include "a\"b")                              // data-on-signal-patch-filter="{ include: /a&quot;b/ }"
+```
+
 ### [Ds.onInterval : `data-on-interval`](https://data-star.dev/reference/attributes#data-on-interval)
 
 Runs a statement at a regular interval. Pass the interval in milliseconds, and `leading = true` to run it once straight away.
@@ -627,15 +662,48 @@ Set `OpenWhenHidden = ValueSome false` to make a `@post` behave like a `@get` he
 Older versions of this library declared the option as `OpenWhenHidden: bool` with a default of `false`, but they never sent that default, so a `@post` used Datastar's `true` anyway.
 The type is now `bool voption`. Change `OpenWhenHidden = true` in your code to `OpenWhenHidden = ValueSome true`.
 
-These options are also available in Datastar 1.0.4:
+Each option is written as a value in an object that follows the URL: `@post('/x',{"retry":"error"})`. In the attribute the quotes are escaped as `&quot;`. Only the options that differ from Datastar's defaults are written.
+The examples below show the F# and what it writes, with the attribute's escaping undone.
 
-- `RequestCancellation = Cleanup` cancels the request when the element it is on is removed from the page.
-- `RequestCancellation = AbortController "$controller"` lets you cancel the request from your own code. The name is a signal that holds an `AbortController`, for example one made with `data-signals:_controller="new AbortController()"`. Datastar only cancels the request when it is given the controller itself, so the name is written as code, not as text.
-- `ContentType = CustomJson obj` sends the object as the request body, instead of the signals.
-- `FilterSignals` sends only the signals that match a `SignalsFilter`. A filter that has an exclude keeps Datastar's rule that signals whose names start with an underscore stay in the browser.
-- `Headers` sends HTTP headers. Each name can be given once, so put several values in one header, separated by commas.
-- `Retry` is sent when it is not `OnAuto`. `OnNever` does not retry a response that is not 200, but Datastar 1.0.4 still retries after a network error, up to `RetryMaxCount` times.
-- `RetryScaler` has to be a finite number.
+**`FilterSignals`** sends only the signals that match. `SignalsFilter.Prefix "form."` matches the signals that start with `form.`. `SignalsFilter.Include` and `SignalsFilter.Exclude` take a regular expression.
+A filter that has an exclude keeps Datastar's rule that signals whose names start with an underscore stay in the browser, which Datastar would otherwise drop when it is given an exclude of its own.
+
+```fsharp
+Ds.get ("/search", { RequestOptions.Defaults with FilterSignals = SignalsFilter.Prefix "form." })
+// @get('/search',{"filterSignals":{"include":"^form\\."}})
+
+Ds.post ("/save", { RequestOptions.Defaults with FilterSignals = SignalsFilter.Exclude "^secret" })
+// @post('/save',{"filterSignals":{"exclude":"(^|\\.)_|(?:^secret)"}})
+```
+
+**`Headers`** sends HTTP headers. Each name can be given once, because a request sends each header name once. Put several values in one header, separated by commas. A name that appears twice raises an `ArgumentException` that says so.
+
+```fsharp
+Ds.post ("/save", { RequestOptions.Defaults with Headers = [ "X-Csrf-Token", "abc" ] })
+// @post('/save',{"headers":{"X-Csrf-Token":"abc"}})
+```
+
+**`RequestCancellation`** decides what happens to an earlier request with the same method and URL. `Auto` cancels it, `Disabled` lets both run, and `Cleanup` also cancels the request when the element it is on is removed from the page.
+`AbortController` lets you cancel the request from your own code. The name is a signal that holds an `AbortController`, for example one made with `data-signals:_controller="new AbortController()"`.
+Datastar only cancels the request when it is given the controller itself, so the name is written as code and not as text. An empty name raises an `ArgumentException`.
+
+```fsharp
+Elem.div [ Attr.create "data-signals:_controller" "new AbortController()" ] [
+    Elem.button [ Ds.onClick (Ds.get ("/slow", { RequestOptions.Defaults with RequestCancellation = AbortController "$_controller" })) ] [ Text.raw "Start" ]
+    Elem.button [ Ds.onClick "$_controller.abort()" ] [ Text.raw "Cancel" ]
+]
+// @get('/slow',{"requestCancellation":$_controller})
+```
+
+**`ContentType`** is `Json` by default and sends the signals. `Form` sends the closest form instead, and `SelectedForm "#myForm"` sends the form that the selector finds. `CustomJson obj` sends the object as the request body, instead of the signals.
+
+**`Retry`** is sent when it is not `OnAuto`. `OnNever` does not retry a response that is not 200, but Datastar 1.0.4 still retries after a network error, up to `RetryMaxCount` times.
+**`RetryScaler`** has to be a finite number. Datastar multiplies the wait by it after every retry, so leave it at 2, or use a number such as 1.5.
+
+```fsharp
+Ds.get ("/x", { RequestOptions.Defaults with Retry = OnError; RetryInterval = TimeSpan.FromMilliseconds 250.0; RetryMaxCount = 4 })
+// @get('/x',{"retry":"error","retryInterval":250,"retryMaxCount":4})
+```
 
 ### [`@setAll`](https://data-star.dev/reference/actions#setall)
 
@@ -695,6 +763,20 @@ CSP mode does not make Datastar expressions safe to use with untrusted content, 
 Pass user values through signals. Do not put them in the text of an expression. Sanitize any HTML that users can provide.
 Datastar also works with Trusted Types: it creates a policy named `datastar`, so a policy with `trusted-types datastar; require-trusted-types-for 'script'` allows it.
 If you use an aliased Datastar script, the attribute carries the alias too, for example `data-star-nonce`. Setting `Constants.dataSlugPrefix <- "data-star"` makes `Ds.nonce` write that name.
+
+### `Ds.safariStreamingFix`
+
+Safari can show a stale copy of a streaming page when the user goes back to it, and the stream never starts again. Put this attribute on the `<body>` of a page that opens a stream, to reload the page when it is restored from the back-forward cache.
+It listens for `pageshow` on the window. Datastar 1.0.4 reads modifiers after `__`, so this library writes `__window`.
+[The problem](https://stackoverflow.com/questions/8788802/prevent-safari-loading-from-cache-when-back-button-is-clicked) is explained on Stack Overflow.
+
+```fsharp
+Elem.body [ Ds.safariStreamingFix; Ds.onInit (Stmt.get "/updates") ] [ (* ... *) ]
+```
+
+```html
+<body data-on:pageshow__window="evt?.persisted && window.location.reload()" data-init="@get('/updates')"></body>
+```
 
 ### [Ds.ignore | Ds.ignoreSelf | Ds.ignoreMorph : `data-ignore`](https://data-star.dev/reference/attributes#data-ignore)
 
@@ -756,7 +838,7 @@ Each helper writes the format its codec reads:
 
 | Helper | Codec | What it writes |
 | --- | --- | --- |
-| `Rocket.propString` | `string` | the text, escaped for use in an attribute |
+| `Rocket.propString` | `string` | the text, escaped for use in an attribute. A carriage return is written as `&#13;`, because a parser would change it into a line feed. HTML cannot keep a NUL character, so it is written as U+FFFD, as a browser would read it |
 | `Rocket.propNumber` | `number` | any number type, with the invariant culture (`1.5`, never `1,5`) |
 | `Rocket.propBool` | `bool` | `true` or `false`, always written, because a missing attribute means the prop's default, which might be true |
 | `Rocket.propDate` | `date` | UTC ISO 8601 with milliseconds, like `Date.toISOString()` |
@@ -874,10 +956,33 @@ let handleManifests : HttpHandler = fun ctx -> task {
 }
 ```
 
-The error is a `RocketManifestError`: `NotJson`, `TooLarge`, `Missing`, `WrongKind`, `UnsupportedVersion` or `NotAnObject`. Match on it, or use its `Message`, which says what is wrong and what to do about it.
+The error is a `RocketManifestError`: `NotJson`, `TooLarge`, `Missing`, `WrongKind`, `UnsupportedVersion`, `NotAnObject`, `ConnectionFailed` or `Cancelled`. Match on it, or use its `Message`, which says what is wrong and what to do about it.
 `Missing` and `WrongKind` say where the problem is, for example the prop "count" of my-card. `Request.getRocketManifests` refuses a body larger than 1 MiB without reading the rest of it.
+```fsharp
+match! Request.getRocketManifests ctx with
+| Ok manifest -> store manifest
+| Error RocketManifestError.Cancelled
+| Error (RocketManifestError.ConnectionFailed _) -> ()      // the page went away, so there is nobody to answer
+| Error (RocketManifestError.UnsupportedVersion (found, supported)) -> log $"version {found} is newer than the {supported} that this library reads"
+| Error error -> log error.Message
+```
+
+`ConnectionFailed` and `Cancelled` mean that the connection failed or the request was cancelled before the whole body arrived, so there may be nobody left to answer. `Request.getRocketManifests` does not throw for any of these. A mistake in your own code, such as reading the body twice, still throws.
 A codec name that this library does not know is kept as `RocketPropType.Other`, so a newer Rocket does not break it.
 This reads the manifest only. Generating F# code from it is left to a separate tool.
+
+## Testing
+
+The unit tests include simulations. They build attributes from hostile text and read the HTML back with a real HTML5 parser, fuzz the Rocket manifest reader, and feed `Request.getRocketManifests` a body that arrives in odd chunks, fails or is cancelled.
+Every random test takes its randomness from a seed, so a failure can be replayed exactly:
+
+```shell
+dotnet test test/Falco.Datastar.Tests -c Release                    # seeds 1 to 25, the same every time
+DST_SEEDS=2000 dotnet test test/Falco.Datastar.Tests -c Release     # seeds 1 to 2000, to look for rare cases
+DST_SEED=417 dotnet test test/Falco.Datastar.Tests -c Release       # only seed 417, to replay a failure
+```
+
+`test/Falco.Datastar.E2E` has browser tests that run only when you start them. See the READMEs in [the unit tests](https://github.com/falcoframework/Falco.Datastar/tree/main/test/Falco.Datastar.Tests) and [the browser tests](https://github.com/falcoframework/Falco.Datastar/tree/main/test/Falco.Datastar.E2E).
 
 ## _When to `$`_
 

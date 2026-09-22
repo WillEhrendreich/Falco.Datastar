@@ -57,7 +57,7 @@ type Rocket =
     /// A string prop. The attribute name is the prop name converted the way Rocket converts it, e.g. <c>maxCount</c> becomes <c>max-count</c>.
     /// </summary>
     /// <param name="name">The prop name as the component defines it, e.g. "label"</param>
-    /// <param name="value">The text. It is escaped for use in an attribute. HTML cannot keep a NUL character in an attribute, so it is written as U+FFFD, which is what a browser would read</param>
+    /// <param name="value">The text. It is escaped for use in an attribute. A carriage return is written as a character reference, because a parser would change it into a line feed. HTML cannot keep a NUL character in an attribute, so it is written as U+FFFD, which is what a browser would read</param>
     /// <returns>Attribute</returns>
     static member propString (name:string, value:string) =
         Rocket.prop (name, value)

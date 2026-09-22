@@ -96,6 +96,7 @@ module internal SignalName =
 module Signal =
     /// Creates a signal, or says why the name cannot be used. Datastar reads a signal name in an expression and in an attribute name,
     /// so the name has to work in both.
+    /// Example: <c>Signal.tryCreate&lt;int&gt; SignalScope.Server "Menu"</c> is an Error, and its Message says: the signal would be called 'menu' in an attribute and 'Menu' in an expression, so start each part with a lower case letter, for example 'menu'.
     let tryCreate<'T> (scope:SignalScope) (name:string) : Result<Signal<'T>, SignalNameError> =
         match SignalName.problem scope name with
         | ValueSome error -> Error error
@@ -109,15 +110,19 @@ module Signal =
     /// A signal that stays in the browser. Datastar never sends it to the server. Write the name without an underscore, because this adds it.
     /// Use it for what the user does on the page, such as an open menu or a loading indicator. Raises an ArgumentException when the name cannot be used;
     /// use tryCreate to get the reason as a value.
+    /// Example: <c>Signal.browser&lt;int&gt; "count"</c> is written <c>_count</c> in an attribute name and <c>$_count</c> in an expression.
     let browser<'T> (name:string) : Signal<'T> = tryCreate<'T> SignalScope.Browser name |> orRaise
 
     /// A signal that Datastar sends to the server with every request. Use it for new state that the backend needs, such as the value of a form input.
     /// Raises an ArgumentException when the name cannot be used; use tryCreate to get the reason as a value.
+    /// Example: <c>Signal.server&lt;string&gt; "form.name"</c> is written <c>form.name</c> in an attribute name and <c>$form.name</c> in an expression.
     let server<'T> (name:string) : Signal<'T> = tryCreate<'T> SignalScope.Server name |> orRaise
 
     /// A signal that belongs to one instance of a Rocket component. Raises an ArgumentException when the name cannot be used; use tryCreate to get the reason as a value.
+    /// Example: <c>Signal.rocket&lt;bool&gt; "open"</c> is read as <c>$$open</c>, and Rocket gives every instance of the component its own.
     let rocket<'T> (name:string) : Signal<'T> = tryCreate<'T> SignalScope.RocketComponent name |> orRaise
 
+    /// Where the signal lives: <c>SignalScope.Browser</c>, <c>Server</c> or <c>RocketComponent</c>.
     let scope (signal:Signal<'T>) = signal.Scope
 
     /// The name as Datastar writes it in an attribute name: with the underscore for a browser signal.
@@ -170,6 +175,8 @@ module Expr =
     /// The JavaScript that Datastar runs, escaped and ready to put in an attribute. It is not meant for a script element, where the escapes would show.
     let toString (Expr text) = text
 
+    /// A whole number. A negative one is put in parentheses, so an operator next to it cannot change its meaning.
+    /// Example: <c>Expr.int 5</c> is <c>5</c>, and <c>Expr.int -3</c> is <c>(-3)</c>.
     let int (value:int) : Expr<int> = Expr (match value < 0 with | true -> $"({value})" | false -> string value)
 
     /// A number. NaN and the infinities are JavaScript literals too, so this never raises.
@@ -177,6 +184,7 @@ module Expr =
         let text = Js.number value
         Expr (match text.StartsWith '-' with | true -> $"({text})" | false -> text)
 
+    /// A boolean. Example: <c>Expr.bool true</c> is <c>true</c>.
     let bool (value:bool) : Expr<bool> = Expr (match value with | true -> "true" | false -> "false")
 
     /// Text. It is escaped, so it stays text whatever it contains.
@@ -201,7 +209,9 @@ module Expr =
 
     /// Adds two numbers. To join text, use concat.
     let add (left:Expr<'n>) (right:Expr<'n>) : Expr<'n> when 'n :> IFormattable = binary "+" left right
+    /// Subtracts. Example: <c>Expr.subtract (Expr.read count) (Expr.int 5)</c> is <c>($_count - 5)</c>.
     let subtract (left:Expr<'n>) (right:Expr<'n>) : Expr<'n> when 'n :> IFormattable = binary "-" left right
+    /// Multiplies. Example: <c>Expr.multiply (Expr.read count) (Expr.int 5)</c> is <c>($_count * 5)</c>.
     let multiply (left:Expr<'n>) (right:Expr<'n>) : Expr<'n> when 'n :> IFormattable = binary "*" left right
 
     let private isWholeNumber<'n> () =
@@ -213,17 +223,27 @@ module Expr =
         match binary "/" left right, isWholeNumber<'n> () with
         | Expr quotient, true -> Expr $"Math.trunc{quotient}"
         | quotient, false -> quotient
+    /// The remainder of a division. Example: <c>Expr.remainder (Expr.read count) (Expr.int 5)</c> is <c>($_count % 5)</c>.
     let remainder (left:Expr<'n>) (right:Expr<'n>) : Expr<'n> when 'n :> IFormattable = binary "%" left right
 
+    /// Is the left value greater than the right one? Example: <c>Expr.greater (Expr.read count) (Expr.int 5)</c> is <c>($_count &gt; 5)</c>.
     let greater (left:Expr<'n>) (right:Expr<'n>) : Expr<bool> when 'n : comparison = binary ">" left right
+    /// Is the left value less than the right one? Example: <c>Expr.less (Expr.read count) (Expr.int 5)</c> is <c>($_count &lt; 5)</c>.
     let less (left:Expr<'n>) (right:Expr<'n>) : Expr<bool> when 'n : comparison = binary "<" left right
+    /// Is the left value greater than or equal to the right one? Example: <c>Expr.atLeast (Expr.read count) (Expr.int 5)</c> is <c>($_count &gt;= 5)</c>.
     let atLeast (left:Expr<'n>) (right:Expr<'n>) : Expr<bool> when 'n : comparison = binary ">=" left right
+    /// Is the left value less than or equal to the right one? Example: <c>Expr.atMost (Expr.read count) (Expr.int 5)</c> is <c>($_count &lt;= 5)</c>.
     let atMost (left:Expr<'n>) (right:Expr<'n>) : Expr<bool> when 'n : comparison = binary "<=" left right
+    /// Are the two values equal? It uses <c>===</c>, so a number is never equal to text. Example: <c>Expr.equal (Expr.read count) (Expr.int 5)</c> is <c>($_count === 5)</c>.
     let equal (left:Expr<'n>) (right:Expr<'n>) : Expr<bool> when 'n : equality = binary "===" left right
+    /// Are the two values different? It uses <c>!==</c>. Example: <c>Expr.notEqual (Expr.read count) (Expr.int 5)</c> is <c>($_count !== 5)</c>.
     let notEqual (left:Expr<'n>) (right:Expr<'n>) : Expr<bool> when 'n : equality = binary "!==" left right
 
+    /// Both conditions are true. Example: <c>Expr.andAlso (Expr.read ok) (Expr.greater (Expr.read count) (Expr.int 5))</c> is <c>($_ok &amp;&amp; ($_count &gt; 5))</c>.
     let andAlso (left:Expr<bool>) (right:Expr<bool>) : Expr<bool> = binary "&&" left right
+    /// At least one condition is true. Example: <c>Expr.orElse (Expr.read ok) (Expr.bool false)</c> is <c>($_ok || false)</c>.
     let orElse (left:Expr<bool>) (right:Expr<bool>) : Expr<bool> = binary "||" left right
+    /// The opposite of a condition. Example: <c>Expr.negate (Expr.read ok)</c> is <c>(!$_ok)</c>.
     let negate (Expr value:Expr<bool>) : Expr<bool> = Expr $"(!{value})"
 
     /// One of two values, chosen by a condition. Both values have the same type.
@@ -276,16 +296,30 @@ module Stmt =
     /// Toggles every signal that matches the filter, or every signal when there is no filter.
     let toggleAllWhere (filter:SignalsFilter) : Stmt = Stmt (FilterActionExpression.toggleAll filter)
 
+    /// Sends a GET request. Datastar sends the signals in the <c>datastar</c> query parameter. The URL is escaped, so it stays text whatever it contains.
+    /// Example: <c>Stmt.get "/items"</c> is <c>@get('/items')</c>.
     let get (url:string) : Stmt = Stmt (BackendActionExpression.render ValueNone (Get url))
+    /// Sends a POST request, with the signals as the JSON body. Example: <c>Stmt.post "/items"</c> is <c>@post('/items')</c>.
     let post (url:string) : Stmt = Stmt (BackendActionExpression.render ValueNone (Post url))
+    /// Sends a PUT request, with the signals as the JSON body. Example: <c>Stmt.put "/items/1"</c> is <c>@put('/items/1')</c>.
     let put (url:string) : Stmt = Stmt (BackendActionExpression.render ValueNone (Put url))
+    /// Sends a PATCH request, with the signals as the JSON body. Example: <c>Stmt.patch "/items/1"</c> is <c>@patch('/items/1')</c>.
     let patch (url:string) : Stmt = Stmt (BackendActionExpression.render ValueNone (Patch url))
+    /// Sends a DELETE request. Datastar sends the signals in the <c>datastar</c> query parameter, as it does for a GET. Example: <c>Stmt.delete "/items/1"</c> is <c>@delete('/items/1')</c>.
     let delete (url:string) : Stmt = Stmt (BackendActionExpression.render ValueNone (Delete url))
+    /// Sends a QUERY request, which does not change anything on the server, with the signals as the body. Needs Datastar 1.0.4. Example: <c>Stmt.query "/search"</c> is <c>@query('/search')</c>.
     let query (url:string) : Stmt = Stmt (BackendActionExpression.render ValueNone (Query url))
 
+    /// Like <see cref="get"/>, with request options. Only the options that differ from Datastar's defaults are written.
+    /// Example: <c>Stmt.getWith "/items" { RequestOptions.Defaults with Retry = OnError }</c> is <c>@get('/items',{"retry":"error"})</c>, with the quotes escaped for the attribute.
     let getWith (url:string) (options:RequestOptions) : Stmt = Stmt (BackendActionExpression.render (ValueSome options) (Get url))
+    /// Like <see cref="post"/>, with request options. Only the options that differ from Datastar's defaults are written.
     let postWith (url:string) (options:RequestOptions) : Stmt = Stmt (BackendActionExpression.render (ValueSome options) (Post url))
+    /// Like <see cref="put"/>, with request options. Only the options that differ from Datastar's defaults are written.
     let putWith (url:string) (options:RequestOptions) : Stmt = Stmt (BackendActionExpression.render (ValueSome options) (Put url))
+    /// Like <see cref="patch"/>, with request options. Only the options that differ from Datastar's defaults are written.
     let patchWith (url:string) (options:RequestOptions) : Stmt = Stmt (BackendActionExpression.render (ValueSome options) (Patch url))
+    /// Like <see cref="delete"/>, with request options. Only the options that differ from Datastar's defaults are written.
     let deleteWith (url:string) (options:RequestOptions) : Stmt = Stmt (BackendActionExpression.render (ValueSome options) (Delete url))
+    /// Like <see cref="query"/>, with request options. Only the options that differ from Datastar's defaults are written.
     let queryWith (url:string) (options:RequestOptions) : Stmt = Stmt (BackendActionExpression.render (ValueSome options) (Query url))

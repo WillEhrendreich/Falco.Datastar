@@ -157,6 +157,9 @@ module RocketManifestTests =
         (RocketManifestError.WrongKind ("components", "a list", "the manifest")).Message |> should equal "The \"components\" in the manifest is not a list"
         (RocketManifestError.TooLarge (1024 * 1024)).Message |> should haveSubstring "larger than 1 MiB"
         (RocketManifestError.NotJson "bad").Message |> should equal "The manifest is not valid JSON: bad"
+        (RocketManifestError.ConnectionFailed "The connection was reset").Message
+        |> should equal "The request body could not be read: The connection was reset. The connection probably closed before the page finished posting, so there may be nobody to answer."
+        RocketManifestError.Cancelled.Message |> should equal "The request was cancelled before the whole body was read, so there may be nobody to answer."
         RocketManifestError.NotAnObject.Message |> should haveSubstring "must be a JSON object"
 
     let private errorOf (result:Result<RocketManifestDocument, RocketManifestError>) =
@@ -278,3 +281,36 @@ module RocketManifestTests =
         match (Request.getRocketManifests ctx).GetAwaiter().GetResult() with
         | Error (RocketManifestError.NotJson _) -> ()
         | other -> failwith $"expected the body to be read and refused as not JSON, got %A{other}"
+
+    /// A body that fails with the exception it is given, on the first read
+    type private FailingStream(error:exn) =
+        inherit Stream()
+        override _.CanRead = true
+        override _.CanSeek = false
+        override _.CanWrite = false
+        override _.Length = raise (NotSupportedException())
+        override _.Position with get () = raise (NotSupportedException()) and set _ = raise (NotSupportedException())
+        override _.Flush () = ()
+        override _.Seek (_, _) = raise (NotSupportedException())
+        override _.SetLength _ = raise (NotSupportedException())
+        override _.Write (_, _, _) = raise (NotSupportedException())
+        override _.Read (_, _, _) = raise error
+
+    let private bodyThatFailsWith (error:exn) =
+        let ctx = DefaultHttpContext()
+        ctx.Request.Body <- new FailingStream(error)
+        ctx
+
+    [<Fact>]
+    let ``Request.getRocketManifests gives ConnectionFailed for what ASP.NET Core throws for a bad or oversized request body`` () =
+        // BadHttpRequestException is an IOException. Kestrel throws it for a body that is malformed, too slow or larger than its own limit.
+        let ctx = bodyThatFailsWith (BadHttpRequestException("Request body too large.", 413))
+        (Request.getRocketManifests ctx).GetAwaiter().GetResult()
+        |> should equal (Error (RocketManifestError.ConnectionFailed "Request body too large.") : Result<RocketManifestDocument, RocketManifestError>)
+
+    [<Fact>]
+    let ``Request.getRocketManifests still throws for a mistake in the code, so that it is not hidden`` () =
+        let ctx = bodyThatFailsWith (InvalidOperationException "The body was already read")
+        let error = Assert.Throws<InvalidOperationException>(fun () -> (Request.getRocketManifests ctx).GetAwaiter().GetResult() |> ignore)
+        error.Message |> should equal "The body was already read"
+
